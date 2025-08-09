@@ -6,7 +6,7 @@ global my_path
 my_path = "D:\\Tools\\Ren'Py\\projects\\Testing\\game\\live2d\\G2MimiruSprite"
 
 class Model:
-    def __init__(self, name):
+    def __init__(self, name: str):
         self.name = name
         self.motions = dict()
         return
@@ -18,7 +18,7 @@ class Model:
             out += f'Motion name: {motion} '
         return out
     
-    def play(self, motion_name):
+    def play(self, motion_name: str) -> None:
         if not isinstance(motion_name, str):
             raise TypeError('Motion name must be a string')
         elif motion_name not in self.motions:
@@ -33,7 +33,7 @@ class Model:
         return
 
 class Motion:
-    def __init__(self, name, duration, loop, curves):
+    def __init__(self, name: str, duration: str, loop: bool, curves: list):
         if not isinstance(name, str):
             raise TypeError('Name must be a string')
         elif not isinstance(duration, float):
@@ -53,7 +53,7 @@ class Motion:
         return f'Name: {self.name} - Duration: {self.duration} - Loop: {self.loop} - Curves: {self.curves}'
 
 class Expression:
-    def __init__(self, name, parameters):
+    def __init__(self, name: str, parameters: list):
         if not isinstance(name, str):
             raise TypeError('Name must be a string')
         elif not isinstance(parameters, list):
@@ -68,7 +68,7 @@ class Expression:
     
 # Static function
 # Load a Live2D model given its directory path
-def load_model(folder_path):
+def load_model(folder_path: str) -> Model:
     # Check if directory is a Live2D model folder
     if path.isdir(folder_path) and path.isfile(path.join(folder_path, path.basename(folder_path) + '.model3.json')):
         # Create an empty model
@@ -97,7 +97,7 @@ def load_model(folder_path):
 
 # Static function
 # Load a Live2D motion given its directory path
-def load_motion(file_path):
+def load_motion(file_path: str) -> Motion:
     with open(file_path, 'r') as file:
         data = json.load(file, parse_int=float)
         motion = Motion(path.basename(file_path).split('.')[0], data['Meta']['Duration'], data['Meta']['Loop'], data['Curves'])
@@ -106,9 +106,25 @@ def load_motion(file_path):
 
 # Static function
 # Load a Live2D expression given its directory path
-def load_expression(file_path):
+def load_expression(file_path: str) -> Expression:
     with open(file_path, 'r') as file:
         data = json.load(file, parse_int=float)
         expression = Expression(path.basename(file_path).split('.')[0], data['Parameters'])
         #print(expression.__str__())
     return expression
+
+# Static function
+# Solve for y given st (x) in a linear equation
+def linear(st: float, p0: tuple[float], p1: tuple[float]) -> float:
+    # Normalise st to t
+    t = st-p0[0] / p1[0]-p0[0]
+    y = (p0[1]+p1[1]) * t
+    return y
+
+# Static function
+# Solve for y given st (x) in a cubic bezier
+def cubic_bezier(st: float, p0: tuple[float], p1: tuple[float], p2: tuple[float], p3: tuple[float]) -> float:
+    # Normalise st to t
+    t = st-p0[0] / p3[0]-p0[0]
+    y = (1-t)**3 * p0[1] + 3*t*(1-t)**2 * p1[1] + 3*(1-t)*t**2 * p2[1] + t**3 * p3[1]
+    return y
