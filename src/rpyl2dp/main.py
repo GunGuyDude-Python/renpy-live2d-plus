@@ -10,6 +10,27 @@ class Model:
         self.name = name
         self.motions = dict()
         return
+    
+    def __str__(self):
+        out = str()
+        out += f'Model name: {self.name} - '
+        for motion in self.motions:
+            out += f'Motion name: {motion} '
+        return out
+    
+    def play(self, motion_name):
+        if not isinstance(motion_name, str):
+            raise TypeError('Motion name must be a string')
+        elif motion_name not in self.motions:
+            raise KeyError('No motion with the given name is associated with this model')
+        else:
+            if isinstance(self.motions[motion_name], Motion):
+                print(self.motions[motion_name].curves)
+            elif isinstance(self.motions[motion_name], Expression):
+                print(self.motions[motion_name].parameters)
+            else:
+                raise TypeError('Motion has an unknown class')
+        return
 
 class Motion:
     def __init__(self, name, duration, loop, curves):
@@ -53,6 +74,7 @@ def load_model(folder_path):
         # Create an empty model
         model = Model(path.basename(folder_path))
         motions_dir = path.join(folder_path, 'Motions')
+        expressions_dir = path.join(folder_path, 'Expressions')
 
         # Read each motion and populate the model
         for motion_entry in os.listdir(motions_dir):
@@ -60,6 +82,13 @@ def load_model(folder_path):
             if path.isfile(motion_path):
                 motion = load_motion(motion_path)
                 model.motions[motion.name] = motion
+
+        # Read each expression and populate the model
+        for expression_entry in os.listdir(expressions_dir):
+            expression_path = path.join(expressions_dir, expression_entry)
+            if path.isfile(expression_path):
+                expression = load_expression(expression_path)
+                model.motions[expression.name] = expression
     
     # Folder not found or Live2D files not found
     else:
