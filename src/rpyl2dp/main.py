@@ -1,33 +1,85 @@
-class ExclusiveMotion:
-    def __init__(self, duration, loop, curves):
-        if not isinstance(duration, int):
-            raise TypeError("Duration must be an integer")
+import os
+from os import path
+import json
+
+global my_path
+my_path = "D:\\Tools\\Ren'Py\\projects\\Testing\\game\\live2d\\G2MimiruSprite"
+
+class Model:
+    def __init__(self, name):
+        self.name = name
+        self.motions = dict()
+        return
+
+class Motion:
+    def __init__(self, name, duration, loop, curves):
+        if not isinstance(name, str):
+            raise TypeError('Name must be a string')
+        elif not isinstance(duration, float):
+            raise TypeError('Duration must be an float')
         elif not isinstance(loop, bool):
-            raise TypeError("Loop must be a bool")
+            raise TypeError('Loop must be a bool')
         elif not isinstance(curves, list):
-            raise TypeError("Curves must be a list")
+            raise TypeError('Curves must be a list')
         else:
+            self.name = name
             self.duration = duration
             self.loop = loop
             self.curves = curves
             return
     
     def __str__(self):
-        return f"Duration: {self.duration} - Loop: {self.loop} - Curves: {self.curves}"
+        return f'Name: {self.name} - Duration: {self.duration} - Loop: {self.loop} - Curves: {self.curves}'
 
-class InclusiveMotion:
-    def __init__(self, duration, loop, curves):
-        if not isinstance(duration, int):
-            raise TypeError("Duration must be an integer")
-        elif not isinstance(loop, bool):
-            raise TypeError("Loop must be a bool")
-        elif not isinstance(curves, list):
-            raise TypeError("Curves must be a list")
+class Expression:
+    def __init__(self, name, parameters):
+        if not isinstance(name, str):
+            raise TypeError('Name must be a string')
+        elif not isinstance(parameters, list):
+            raise TypeError('Parameters must be a list')
         else:
-            self.duration = duration
-            self.loop = loop
-            self.curves = curves
+            self.name = name
+            self.parameters = parameters
             return
-
+        
     def __str__(self):
-        return f"Duration: {self.duration} - Loop: {self.loop} - Curves: {self.curves}"
+        return f'Name: {self.name} - Parameters: {self.parameters}'
+    
+# Static function
+# Load a Live2D model given its directory path
+def load_model(folder_path):
+    # Check if directory is a Live2D model folder
+    if path.isdir(folder_path) and path.isfile(path.join(folder_path, path.basename(folder_path) + '.model3.json')):
+        # Create an empty model
+        model = Model(path.basename(folder_path))
+        motions_dir = path.join(folder_path, 'Motions')
+
+        # Read each motion and populate the model
+        for motion_entry in os.listdir(motions_dir):
+            motion_path = path.join(motions_dir, motion_entry)
+            if path.isfile(motion_path):
+                motion = load_motion(motion_path)
+                model.motions[motion.name] = motion
+    
+    # Folder not found or Live2D files not found
+    else:
+        raise OSError('Live2D model not found')
+    return model
+
+# Static function
+# Load a Live2D motion given its directory path
+def load_motion(file_path):
+    with open(file_path, 'r') as file:
+        data = json.load(file, parse_int=float)
+        motion = Motion(path.basename(file_path).split('.')[0], data['Meta']['Duration'], data['Meta']['Loop'], data['Curves'])
+        #print(motion.__str__())
+    return motion
+
+# Static function
+# Load a Live2D expression given its directory path
+def load_expression(file_path):
+    with open(file_path, 'r') as file:
+        data = json.load(file, parse_int=float)
+        expression = Expression(path.basename(file_path).split('.')[0], data['Parameters'])
+        #print(expression.__str__())
+    return expression
