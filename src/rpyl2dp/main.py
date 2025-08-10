@@ -21,7 +21,7 @@ class Model:
     def play(self, motion_name: str) -> None:
         if not isinstance(motion_name, str):
             raise TypeError('Motion name must be a string')
-        elif motion_name not in self.motions:
+        elif not motion_name in self.motions:
             raise KeyError('No motion with the given name is associated with this model')
         else:
             if isinstance(self.motions[motion_name], Motion):
@@ -32,8 +32,56 @@ class Model:
                 raise TypeError('Motion has an unknown class')
         return
 
+# Find the value of every parameter of this motion at this second
+    def second(self, motion_name: str, st: float) -> float:
+        values = list()
+        if not isinstance(motion_name, str):
+            raise TypeError('Motion name must be a string')
+        elif not (isinstance(st, float) or isinstance(st, int)):
+            raise TypeError('Seconds must be a float')
+        elif not motion_name in self.motions:
+            raise KeyError('No motion with the given name is associated with this model')
+        else:
+            if isinstance(self.motions[motion_name], Motion):
+                # Find the value of every parameter of this motion at this second
+                if st > self.motions[motion_name].duration:
+                    raise ValueError('Requested seconds is longer than motion duration')
+                else:
+                    for curve in self.motions[motion_name].curves:
+                        target = curve['Target']
+                        id = curve['Id']
+                        segments = curve['Segments']
+                        row = 2
+                        while((segments[row+5] < st) if (segments[row] == 1) else (segments[row+1] < st)):
+                            if segments[row] == 0:
+                                # Linear segment
+                                row += 3
+                            elif segments[row] == 1:
+                                # Bezier segment
+                                row += 7
+                            elif segments[row] == 2 or segments[row] == 3:
+                                raise ValueError('Stepped and inverse-stepped segments are unsupported')
+                            else:
+                                raise ValueError('Unknown segment type')
+                        p0 = (segments[row-2], segments[row-1])
+                        p1 = (segments[row+1], segments[row+2])
+                        if segments[row] == 1:
+                            p2 = (segments[row+3], segments[row+4])
+                            p3 = (segments[row+5], segments[row+6])
+                            value = cubic_bezier(st, p0, p1, p2, p3)
+                        else:
+                            value = linear(st, p0, p1)
+                        values.append({'Target': target, 'Id': id, 'Value': value})
+
+            elif isinstance(self.motions[motion_name], Expression):
+                # Find the value of every parameter of this expression
+                values = self.motions[motion_name].parameters.copy()
+            else:
+                raise TypeError('Motion has an unknown class')
+        return values
+    
 class Motion:
-    def __init__(self, name: str, duration: str, loop: bool, curves: list):
+    def __init__(self, name: str, duration: float, loop: bool, curves: list):
         if not isinstance(name, str):
             raise TypeError('Name must be a string')
         elif not isinstance(duration, float):
@@ -117,7 +165,7 @@ def load_expression(file_path: str) -> Expression:
 # Solve for y given st (x) in a linear equation
 def linear(st: float, p0: tuple[float], p1: tuple[float]) -> float:
     # Normalise st to t
-    t = st-p0[0] / p1[0]-p0[0]
+    t = (st-p0[0]) / (p1[0]-p0[0])
     y = t*(p1[1]-p0[1]) + p0[1]
     return y
 
@@ -125,6 +173,6 @@ def linear(st: float, p0: tuple[float], p1: tuple[float]) -> float:
 # Solve for y given st (x) in a cubic bezier
 def cubic_bezier(st: float, p0: tuple[float], p1: tuple[float], p2: tuple[float], p3: tuple[float]) -> float:
     # Normalise st to t
-    t = st-p0[0] / p3[0]-p0[0]
+    t = (st-p0[0]) / (p3[0]-p0[0])
     y = (1-t)**3 * p0[1] + 3*t*(1-t)**2 * p1[1] + 3*(1-t)*t**2 * p2[1] + t**3 * p3[1]
     return y
