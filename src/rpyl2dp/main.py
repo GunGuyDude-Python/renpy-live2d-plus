@@ -118,7 +118,7 @@ def load_expression(file_path: str) -> Expression:
 def linear(st: float, p0: tuple[float], p1: tuple[float]) -> float:
     # Normalise st to t
     t = st-p0[0] / p1[0]-p0[0]
-    y = (p0[1]+p1[1]) * t
+    y = t*(p1[1]-p0[1]) + p0[1]
     return y
 
 # Static function
