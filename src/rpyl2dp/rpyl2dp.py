@@ -8,17 +8,20 @@ my_path = "D:\\Tools\\Ren'Py\\projects\\Testing\\game\\live2d\\G2MimiruSprite"
 
 class Model:
     def __init__(self, name: str):
-        self.name = name
-        self.motions = dict()
-        self.exclusive = Exclusive()
-        self.inclusive = Inclusive()
+        self.name: str = name
+        self.animations: dict = dict()
+        self.exclusive: Exclusive = Exclusive()
+        self.inclusive: Inclusive = Inclusive()
+        self.action: Animation = None
+        self.action_start_time: float = 0.0
+        self.action_end_time: float = 0.0
         return
     
     def __str__(self):
-        out = str()
+        out: str = str()
         out += f'Model name: {self.name} - '
-        for motion in self.motions:
-            out += f'Motion name: {motion} '
+        for animation in self.animations:
+            out += f'Animation name: {animation} '
         return out
     
     def exclusive_push(self, wait_seconds: float, animation_name: str) -> None:
@@ -40,36 +43,78 @@ class Model:
         return
 
     # WIP
-    def play(self, motion_name: str) -> None:
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
-        elif motion_name not in self.motions:
-            raise KeyError('No motion with the given name is associated with this model')
+    def play(self, animation_name: str) -> None:
+        if not isinstance(animation_name, str):
+            raise TypeError('Animation name must be a string')
+        elif animation_name not in self.animations:
+            raise KeyError('No animation with the given name is associated with this model')
         else:
-            if isinstance(self.motions[motion_name], Motion):
-                print(self.motions[motion_name].curves)
-            elif isinstance(self.motions[motion_name], Expression):
-                print(self.motions[motion_name].parameters)
+            if isinstance(self.animations[animation_name], Motion):
+                print(self.animations[animation_name].curves)
+            elif isinstance(self.animations[animation_name], Expression):
+                print(self.animations[animation_name].parameters)
             else:
-                raise TypeError('Motion has an unknown class')
+                raise TypeError('Animation has an unknown class')
         return
 
-    # Find the value of every parameter of this motion at this second
-    def second(self, motion_name: str, st: float) -> float:
-        values = list()
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
+    # Call every frame to animate both exclusive and inclusive animations
+    def animate(self, st: float) -> None:
+        self.animate_exclusive(st)
+        self.animate_inclusive(st)
+
+    # Call every frame to animate exclusive animations
+    def animate_exclusive(self, st: float) -> None:
+        if not isinstance(st, float):
+            raise TypeError('Seconds must be a float')
+        # If currently idle, check queue
+        elif st >= self.action_end_time:
+            # ADD CODE FOR LOADING NEXT MOTION!!!!!!!!----------------------------------------------------------------------------------------------------------
+            # If queue empty, continue idling
+            if self.exclusive_empty():
+                return
+            # Otherwise pop from queue and play motion
+            else:
+                (wait_seconds, animation_name) = self.exclusive_pop()
+                self.action = self.animations[animation_name]
+                if isinstance(self.action, Expression):
+                    raise TypeError('Expressions cannot be exclusive animations')
+                else:
+                    self.action_start_time = st + wait_seconds
+                    self.action_end_time = self.action_start_time + (Motion) (self.action).duration
+                return
+        # If currently playing a motion, set model parameters
+        elif st >= self.action_start_time:
+            relative_st = st - self.action_start_time
+            # Failsafe for if the animation has finished playing but program thinks it's still playing
+            if relative_st > (Motion) (self.action).duration:
+                return
+            else:
+                # WIP---------------------------------------------------------------------------------------------------------------------------------------------
+                return
+        # If currently waiting to start a motion, idle
+        elif st < self.action_start_time:
+            return
+        
+    # Call every frame to animate inclusive animations
+    def animate_inclusive(self, st: float) -> None:
+        pass
+
+    # Find the value of every parameter of this animation at this second
+    def second(self, animation_name: str, st: float) -> float:
+        values: list = list()
+        if not isinstance(animation_name, str):
+            raise TypeError('Animation name must be a string')
         elif not (isinstance(st, float) or isinstance(st, int)):
             raise TypeError('Seconds must be a float')
-        elif motion_name not in self.motions:
-            raise KeyError('No motion with the given name is associated with this model')
+        elif animation_name not in self.animations:
+            raise KeyError('No animation with the given name is associated with this model')
         else:
-            if isinstance(self.motions[motion_name], Motion):
+            if isinstance(self.animations[animation_name], Motion):
                 # Find the value of every parameter of this motion at this second
-                if st > self.motions[motion_name].duration:
+                if st > self.animations[animation_name].duration:
                     raise ValueError('Requested seconds is longer than motion duration')
                 else:
-                    for curve in self.motions[motion_name].curves:
+                    for curve in self.animations[animation_name].curves:
                         target = curve['Target']
                         id = curve['Id']
                         segments = curve['Segments']
@@ -95,11 +140,11 @@ class Model:
                             value = linear(st, p0, p1)
                         values.append({'Target': target, 'Id': id, 'Value': value})
 
-            elif isinstance(self.motions[motion_name], Expression):
+            elif isinstance(self.animations[animation_name], Expression):
                 # Find the value of every parameter of this expression
-                values = self.motions[motion_name].parameters.copy()
+                values = self.animations[animation_name].parameters.copy()
             else:
-                raise TypeError('Motion has an unknown class')
+                raise TypeError('Animation has an unknown class')
         return values
 
 # Parent class for motions and animations
@@ -108,7 +153,7 @@ class Animation:
         if not isinstance(name, str):
             raise TypeError('Name must be a string')
         else:
-            self.name = name
+            self.name: str = name
             return
 
     def __str__(self):
@@ -126,10 +171,10 @@ class Motion(Animation):
         elif not isinstance(curves, list):
             raise TypeError('Curves must be a list')
         else:
-            self.name = name
-            self.duration = duration
-            self.loop = loop
-            self.curves = curves
+            self.name: str = name
+            self.duration: float = duration
+            self.loop: bool = loop
+            self.curves: list = curves
             return
     
     def __str__(self):
@@ -143,8 +188,8 @@ class Expression(Animation):
         elif not isinstance(parameters, list):
             raise TypeError('Parameters must be a list')
         else:
-            self.name = name
-            self.parameters = parameters
+            self.name: str = name
+            self.parameters: list = parameters
             return
         
     def __str__(self):
@@ -153,7 +198,7 @@ class Expression(Animation):
 # Exclusive animations use a FIFO queue. Exclusive animations can only play one at a time.
 class Exclusive:
     def __init__(self):
-        self.exclusive_queue = queue.Queue()
+        self.exclusive_queue: queue.Queue = queue.Queue()
         return
 
     def push(self, wait_seconds: float, animation_name: str) -> None:
@@ -175,7 +220,7 @@ class Exclusive:
 # Inclusive animations use a dict. All inclusive animations in the dict can play simultaneously.
 class Inclusive:
     def __init__(self):
-        self.inclusive_dict = dict()
+        self.inclusive_dict: dict = dict()
         return
 
     def add(self, min_seconds: float, max_seconds: float, animation_name: str) -> None:
@@ -204,7 +249,7 @@ def load_model(folder_path: str) -> Model:
     # Check if directory is a Live2D model folder
     if path.isdir(folder_path) and path.isfile(path.join(folder_path, path.basename(folder_path) + '.model3.json')):
         # Create an empty model
-        model = Model(path.basename(folder_path))
+        model = Model(path.basename(folder_path).split('.')[0])
         motions_dir = path.join(folder_path, 'Motions')
         expressions_dir = path.join(folder_path, 'Expressions')
 
@@ -213,14 +258,14 @@ def load_model(folder_path: str) -> Model:
             motion_path = path.join(motions_dir, motion_entry)
             if path.isfile(motion_path):
                 motion = load_motion(motion_path)
-                model.motions[motion.name] = motion
+                model.animations[motion.name] = motion
 
         # Read each expression and populate the model
         for expression_entry in os.listdir(expressions_dir):
             expression_path = path.join(expressions_dir, expression_entry)
             if path.isfile(expression_path):
                 expression = load_expression(expression_path)
-                model.motions[expression.name] = expression
+                model.animations[expression.name] = expression
     
     # Folder not found or Live2D files not found
     else:
