@@ -12,7 +12,7 @@ class Model:
         self.animations: dict = dict()
         self.exclusive: Exclusive = Exclusive()
         self.inclusive: Inclusive = Inclusive()
-        self.action: Animation = None
+        self.action: Motion = None
         self.action_start_time: float = 0.0
         self.action_end_time: float = 0.0
         return
@@ -69,51 +69,64 @@ class Model:
         else:
             (wait_seconds, animation_name) = self.exclusive_pop()
             self.action = self.animations[animation_name]
-            if isinstance(self.action, Expression):
-                raise TypeError('Expressions cannot be exclusive animations')
+            if not isinstance(self.action, Motion):
+                raise TypeError('Only motions can be an exclusive animation')
             else:
                 self.action_start_time = st + wait_seconds
-                self.action_end_time = self.action_start_time + (Motion) (self.action).duration
+                self.action_end_time = self.action_start_time + self.action.duration
             return
 
     # Call every frame to animate both exclusive and inclusive animations
-    def animate(self, st: float) -> None:
-        self.animate_exclusive(st)
-        self.animate_inclusive(st)
+    def update(self, renpy_model, st: float) -> None:
+        self.animate_exclusive(renpy_model, st)
+        self.animate_inclusive(renpy_model, st)
 
     # Call every frame to animate exclusive animations
-    def animate_exclusive(self, st: float) -> None:
+    def animate_exclusive(self, renpy_model, st: float) -> None:
         if not isinstance(st, float):
             raise TypeError('Seconds must be a float')
         # If currently idle, check queue
         elif st >= self.action_end_time:
             # If queue empty and looping, add motion to the queue again
-            if self.exclusive_empty() and (Motion) (self.action).loop == True:
+            if self.exclusive_empty() and self.action.loop == True:
                 self.exclusive_push(0.0, self.action.name)
-                self.skip()
+                self.skip(st)
                 return
             # If queue empty and not looping, do nothing
             elif self.exclusive_empty():
                 return
             # Otherwise pop from queue and play motion
             else:
-                self.skip()
+                self.skip(st)
                 return
         # If currently playing a motion, set model parameters
         elif st >= self.action_start_time:
             relative_st = st - self.action_start_time
             # Failsafe for if the animation has finished playing but program thinks it's still playing
-            if relative_st > (Motion) (self.action).duration:
+            if relative_st > self.action.duration:
                 return
             else:
-                # WIP---------------------------------------------------------------------------------------------------------------------------------------------
+                params = self.second(self.action.name, relative_st)
+                for param in params:
+                    # Model opacity
+                    if param['Target'] == 'Model' and param['Id'] == 'Opacity':
+                        # WIP
+                        pass
+                    # Part parameter value
+                    elif param['Target'] == 'Parameter':
+                        renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
+                        print(param)
+                    # Part opacity
+                    elif param['Target'] == 'PartOpacity':
+                        renpy_model.blend_opacity(param['Id'], "Overwrite", param['Value'])
+                        print(param)
                 return
         # If currently waiting to start a motion, idle
         elif st < self.action_start_time:
             return
         
     # Call every frame to animate inclusive animations
-    def animate_inclusive(self, st: float) -> None:
+    def animate_inclusive(self, renpy_model, st: float) -> None:
         pass
 
     # Find the value of every parameter of this animation at this second
