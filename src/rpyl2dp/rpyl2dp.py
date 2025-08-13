@@ -24,20 +24,25 @@ class Model:
             out += f'Animation name: {animation} '
         return out
     
+    # Wrapper function
     def exclusive_push(self, wait_seconds: float, animation_name: str) -> None:
         self.exclusive.push(wait_seconds, animation_name)
         return
     
+    # Wrapper function
     def exclusive_pop(self) -> tuple[float, str]:
         return self.exclusive.pop()
     
+    # Wrapper function
     def exclusive_empty(self) -> bool:
         return self.exclusive.exclusive_queue.empty()
     
+    # Wrapper function
     def inclusive_add(self, min_seconds: float, max_seconds: float, animation_name: str) -> None:
         self.inclusive.add(min_seconds, max_seconds, animation_name)
         return
     
+    # Wrapper function
     def inclusive_remove(self, animation_name: str) -> None:
         self.inclusive.remove(animation_name)
         return
@@ -56,6 +61,20 @@ class Model:
             else:
                 raise TypeError('Animation has an unknown class')
         return
+    
+    # Skip the current exclusive motion and immediately play the next in queue
+    def skip(self, st: float) -> None:
+        if self.exclusive_empty():
+            return
+        else:
+            (wait_seconds, animation_name) = self.exclusive_pop()
+            self.action = self.animations[animation_name]
+            if isinstance(self.action, Expression):
+                raise TypeError('Expressions cannot be exclusive animations')
+            else:
+                self.action_start_time = st + wait_seconds
+                self.action_end_time = self.action_start_time + (Motion) (self.action).duration
+            return
 
     # Call every frame to animate both exclusive and inclusive animations
     def animate(self, st: float) -> None:
@@ -68,19 +87,17 @@ class Model:
             raise TypeError('Seconds must be a float')
         # If currently idle, check queue
         elif st >= self.action_end_time:
-            # ADD CODE FOR LOADING NEXT MOTION!!!!!!!!----------------------------------------------------------------------------------------------------------
-            # If queue empty, continue idling
-            if self.exclusive_empty():
+            # If queue empty and looping, add motion to the queue again
+            if self.exclusive_empty() and (Motion) (self.action).loop == True:
+                self.exclusive_push(0.0, self.action.name)
+                self.skip()
+                return
+            # If queue empty and not looping, do nothing
+            elif self.exclusive_empty():
                 return
             # Otherwise pop from queue and play motion
             else:
-                (wait_seconds, animation_name) = self.exclusive_pop()
-                self.action = self.animations[animation_name]
-                if isinstance(self.action, Expression):
-                    raise TypeError('Expressions cannot be exclusive animations')
-                else:
-                    self.action_start_time = st + wait_seconds
-                    self.action_end_time = self.action_start_time + (Motion) (self.action).duration
+                self.skip()
                 return
         # If currently playing a motion, set model parameters
         elif st >= self.action_start_time:
