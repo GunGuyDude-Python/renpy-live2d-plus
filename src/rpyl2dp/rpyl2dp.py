@@ -2,6 +2,7 @@ import os
 from os import path
 import json
 import queue
+import random
 
 global my_path
 my_path = "D:\\Tools\\Ren'Py\\projects\\Testing\\game\\live2d\\G2MimiruSprite"
@@ -15,6 +16,7 @@ class Model:
         self.action: Motion = None
         self.action_start_time: float = 0.0
         self.action_end_time: float = 0.0
+        self.action_loop: bool = False
         return
     
     def __str__(self):
@@ -25,13 +27,27 @@ class Model:
         return out
     
     # Wrapper function
-    def exclusive_push(self, wait_seconds: float, animation_name: str) -> None:
-        self.exclusive.push(wait_seconds, animation_name)
+    def exclusive_push(self, wait_seconds: float, animation_name: str, loop: bool) -> None:
+        self.exclusive.push(wait_seconds, animation_name, loop)
         return
     
     # Wrapper function
-    def exclusive_pop(self) -> tuple[float, str]:
+    def exclusive_pop(self) -> tuple[float, str, bool]:
         return self.exclusive.pop()
+    
+    # Skip the current exclusive motion and immediately play the next in queue
+    def exclusive_skip(self, st: float) -> None:
+        if self.exclusive_empty():
+            return
+        else:
+            (wait_seconds, animation_name, loop) = self.exclusive_pop()
+            self.action = self.animations[animation_name]
+            if not isinstance(self.action, Motion):
+                raise TypeError('Only motions can be an exclusive animation')
+            else:
+                self.action_start_time = st + wait_seconds
+                self.action_end_time = self.action_start_time + self.action.duration
+            return
     
     # Wrapper function
     def exclusive_empty(self) -> bool:
@@ -47,35 +63,6 @@ class Model:
         self.inclusive.remove(animation_name)
         return
 
-    # WIP
-    def play(self, animation_name: str) -> None:
-        if not isinstance(animation_name, str):
-            raise TypeError('Animation name must be a string')
-        elif animation_name not in self.animations:
-            raise KeyError('No animation with the given name is associated with this model')
-        else:
-            if isinstance(self.animations[animation_name], Motion):
-                print(self.animations[animation_name].curves)
-            elif isinstance(self.animations[animation_name], Expression):
-                print(self.animations[animation_name].parameters)
-            else:
-                raise TypeError('Animation has an unknown class')
-        return
-    
-    # Skip the current exclusive motion and immediately play the next in queue
-    def skip(self, st: float) -> None:
-        if self.exclusive_empty():
-            return
-        else:
-            (wait_seconds, animation_name) = self.exclusive_pop()
-            self.action = self.animations[animation_name]
-            if not isinstance(self.action, Motion):
-                raise TypeError('Only motions can be an exclusive animation')
-            else:
-                self.action_start_time = st + wait_seconds
-                self.action_end_time = self.action_start_time + self.action.duration
-            return
-
     # Call every frame to animate both exclusive and inclusive animations
     def update(self, renpy_model, st: float) -> None:
         self.animate_exclusive(renpy_model, st)
@@ -85,26 +72,27 @@ class Model:
     def animate_exclusive(self, renpy_model, st: float) -> None:
         if not isinstance(st, float):
             raise TypeError('Seconds must be a float')
+        
         # If currently idle, check queue
         elif st >= self.action_end_time:
             # If queue empty and looping, add motion to the queue again
-            if self.exclusive_empty() and self.action.loop == True:
-                self.exclusive_push(0.0, self.action.name)
-                self.skip(st)
-                return
+            if self.exclusive_empty() and self.action_loop == True:
+                self.exclusive_push(0.0, self.action.name, self.action_loop)
+                self.exclusive_skip(st)
             # If queue empty and not looping, do nothing
             elif self.exclusive_empty():
-                return
+                pass
             # Otherwise pop from queue and play motion
             else:
-                self.skip(st)
-                return
+                self.exclusive_skip(st)
+            return
+        
         # If currently playing a motion, set model parameters
         elif st >= self.action_start_time:
             relative_st = st - self.action_start_time
             # Failsafe for if the animation has finished playing but program thinks it's still playing
             if relative_st > self.action.duration:
-                return
+                pass
             else:
                 params = self.second(self.action.name, relative_st)
                 for param in params:
@@ -115,19 +103,49 @@ class Model:
                     # Part parameter value
                     elif param['Target'] == 'Parameter':
                         renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
-                        print(param)
                     # Part opacity
                     elif param['Target'] == 'PartOpacity':
                         renpy_model.blend_opacity(param['Id'], "Overwrite", param['Value'])
-                        print(param)
-                return
-        # If currently waiting to start a motion, idle
-        elif st < self.action_start_time:
+            return
+        
+        # Else motion is waiting to start
+        else:
             return
         
     # Call every frame to animate inclusive animations
     def animate_inclusive(self, renpy_model, st: float) -> None:
-        pass
+        for animation_name, (min_seconds, max_seconds, start_time, end_time) in self.inclusive.inclusive_dict.items():
+            # If motion has finished playing, randomise a new wait time before looping
+            if st > end_time:
+                rand = min_seconds + (max_seconds - min_seconds) * random.random()
+                self.inclusive.inclusive_dict[animation_name] = (min_seconds, max_seconds, st + rand, st + self.animations[animation_name].duration + rand)
+
+        # Refresh values after updating
+        for animation_name, (min_seconds, max_seconds, start_time, end_time) in self.inclusive.inclusive_dict.items():
+            relative_st = st - start_time
+            if relative_st > end_time - start_time:
+                # Impossible end time value, should have been updated above
+                raise ValueError('Invalid end time value')
+            
+            # If motion is currently playing
+            elif relative_st > 0:
+                params = self.second(animation_name, relative_st)
+                for param in params:
+                    # Model opacity
+                    if param['Target'] == 'Model' and param['Id'] == 'Opacity':
+                        # WIP
+                        pass
+                    # Part parameter value
+                    elif param['Target'] == 'Parameter':
+                        renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
+                    # Part opacity
+                    elif param['Target'] == 'PartOpacity':
+                        renpy_model.blend_opacity(param['Id'], "Overwrite", param['Value'])
+
+            # Else motion is waiting to start
+            else:
+                pass
+        return
 
     # Find the value of every parameter of this animation at this second
     def second(self, animation_name: str, st: float) -> float:
@@ -149,6 +167,7 @@ class Model:
                         id = curve['Id']
                         segments = curve['Segments']
                         row = 2
+
                         while((segments[row+5] < st) if (segments[row] == 1) else (segments[row+1] < st)):
                             if segments[row] == 0:
                                 # Linear segment
@@ -160,6 +179,7 @@ class Model:
                                 raise ValueError('Stepped and inverse-stepped segments are unsupported')
                             else:
                                 raise ValueError('Unknown segment type')
+                            
                         p0 = (segments[row-2], segments[row-1])
                         p1 = (segments[row+1], segments[row+2])
                         if segments[row] == 1:
@@ -191,24 +211,21 @@ class Animation:
 
 # Class for motions
 class Motion(Animation):
-    def __init__(self, name: str, duration: float, loop: bool, curves: list):
+    def __init__(self, name: str, duration: float, curves: list):
         if not isinstance(name, str):
             raise TypeError('Name must be a string')
         elif not isinstance(duration, float):
             raise TypeError('Duration must be an float')
-        elif not isinstance(loop, bool):
-            raise TypeError('Loop must be a bool')
         elif not isinstance(curves, list):
             raise TypeError('Curves must be a list')
         else:
             self.name: str = name
             self.duration: float = duration
-            self.loop: bool = loop
             self.curves: list = curves
             return
     
     def __str__(self):
-        return f'Name: {self.name} - Duration: {self.duration} - Loop: {self.loop} - Curves: {self.curves}'
+        return f'Name: {self.name} - Duration: {self.duration} - Curves: {self.curves}'
 
 # Class for expressions
 class Expression(Animation):
@@ -231,21 +248,23 @@ class Exclusive:
         self.exclusive_queue: queue.Queue = queue.Queue()
         return
 
-    def push(self, wait_seconds: float, animation_name: str) -> None:
+    def push(self, wait_seconds: float, animation_name: str, loop: bool) -> None:
         if not isinstance(wait_seconds, float):
             raise TypeError('Wait seconds must be a float')
         elif not isinstance(animation_name, str):
             raise TypeError('Animation name must be a string')
+        elif not isinstance(loop, bool):
+            raise TypeError('Loop must be a bool')
         else:
-            self.exclusive_queue.put((wait_seconds, animation_name))
+            self.exclusive_queue.put((wait_seconds, animation_name, loop))
             return
     
-    def pop(self) -> tuple[float, str]:
+    def pop(self) -> tuple[float, str, bool]:
         if self.exclusive_queue.empty():
             return None
         else:
-            (wait_seconds, animation_name) = self.exclusive_queue.get()
-            return (wait_seconds, animation_name)
+            (wait_seconds, animation_name, loop) = self.exclusive_queue.get()
+            return (wait_seconds, animation_name, loop)
 
 # Inclusive animations use a dict. All inclusive animations in the dict can play simultaneously.
 class Inclusive:
@@ -261,7 +280,7 @@ class Inclusive:
         elif not isinstance(animation_name, str):
             raise TypeError('Animation name must be a string')
         else:
-            self.inclusive_dict[animation_name] = (min_seconds, max_seconds)
+            self.inclusive_dict[animation_name] = (min_seconds, max_seconds, 0.0, 0.0)
             return
 
     def remove(self, animation_name: str) -> None:
@@ -307,7 +326,7 @@ def load_model(folder_path: str) -> Model:
 def load_motion(file_path: str) -> Motion:
     with open(file_path, 'r') as file:
         data = json.load(file, parse_int=float)
-        motion = Motion(path.basename(file_path).split('.')[0], data['Meta']['Duration'], data['Meta']['Loop'], data['Curves'])
+        motion = Motion(path.basename(file_path).split('.')[0], data['Meta']['Duration'], data['Curves'])
         #print(motion.__str__())
     return motion
 
