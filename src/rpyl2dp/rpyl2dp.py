@@ -17,6 +17,7 @@ class Model:
         self.action_start_time: float = 0.0
         self.action_end_time: float = 0.0
         self.action_loop: bool = False
+        self.persistent: dict = dict()
         return
     
     def __str__(self):
@@ -64,9 +65,25 @@ class Model:
         return
 
     # Call every frame to animate both exclusive and inclusive animations
-    def update(self, renpy_model, st: float) -> None:
+    def update(self, renpy_model, st: float) -> float:
+        fps = 30.0
+        self.force_persistence(renpy_model)
         self.animate_exclusive(renpy_model, st)
         self.animate_inclusive(renpy_model, st)
+        return 1.0/fps
+
+    # Make it so when exclusive motions end they do not revert parameters to default values
+    def force_persistence(self, renpy_model) -> None:
+        for (target, id), value in self.persistent.items():
+            if target == 'Model' and id == 'Opacity':
+                # WIP
+                pass
+            # Part parameter value
+            elif target == 'Parameter':
+                renpy_model.blend_parameter(id, "Overwrite", value)
+            # Part opacity
+            elif target == 'PartOpacity':
+                renpy_model.blend_opacity(id, "Overwrite", value)
 
     # Call every frame to animate exclusive animations
     def animate_exclusive(self, renpy_model, st: float) -> None:
@@ -106,6 +123,7 @@ class Model:
                     # Part opacity
                     elif param['Target'] == 'PartOpacity':
                         renpy_model.blend_opacity(param['Id'], "Overwrite", param['Value'])
+                    self.persistent[(param['Target'], param['Id'])] = param['Value']
             return
         
         # Else motion is waiting to start
@@ -148,7 +166,7 @@ class Model:
         return
 
     # Find the value of every parameter of this animation at this second
-    def second(self, animation_name: str, st: float) -> float:
+    def second(self, animation_name: str, st: float) -> list[dict]:
         values: list = list()
         if not isinstance(animation_name, str):
             raise TypeError('Animation name must be a string')
