@@ -4,8 +4,8 @@ import json
 import queue
 import random
 
-global my_path
-my_path = "D:\\Tools\\Ren'Py\\projects\\Testing\\game\\live2d\\G2MimiruSprite"
+global fps
+fps = 30.0
 
 class Model:
     def __init__(self, name: str):
@@ -66,7 +66,6 @@ class Model:
 
     # Call every frame to animate both exclusive and inclusive animations
     def update(self, renpy_model, st: float) -> float:
-        fps = 30.0
         self.force_persistence(renpy_model)
         self.animate_exclusive(renpy_model, st)
         self.animate_inclusive(renpy_model, st)
