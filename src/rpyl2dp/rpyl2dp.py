@@ -43,6 +43,7 @@ class Model:
         else:
             (wait_seconds, animation_name, loop) = self.exclusive_pop()
             self.action = self.animations[animation_name]
+            self.action_loop = loop
             if not isinstance(self.action, Motion):
                 raise TypeError('Only motions can be an exclusive animation')
             else:
