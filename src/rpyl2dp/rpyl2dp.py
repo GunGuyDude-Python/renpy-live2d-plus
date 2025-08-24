@@ -41,7 +41,7 @@ class Model:
 #######################################################################################################################
     
     # Push a motion to the exclusive queue
-    def exclusive_push(self, motion_name: str, wait_seconds: float=0.0, loop: bool=True) -> None:
+    def exclusive_push(self, motion_name: str, wait_seconds: float=0, loop: bool=True) -> None:
         self.exclusive.push(motion_name, wait_seconds, loop)
         return
     
@@ -66,7 +66,7 @@ class Model:
         return self.exclusive.exclusive_queue.empty()
     
     # Add a motion to the inclusive set
-    def inclusive_add(self, motion_name: str, min_seconds: float=0.0, max_seconds: float=0.0) -> None:
+    def inclusive_add(self, motion_name: str, min_seconds: float=0, max_seconds: float=0) -> None:
         self.inclusive.add(motion_name, min_seconds, max_seconds)
         return
     
@@ -114,7 +114,7 @@ class Model:
         if self.st >= self.action_end_time:
             # If queue empty and looping, add motion to the queue again
             if self.exclusive_empty() and self.action_loop == True:
-                self.exclusive_push(0.0, self.action.name, self.action_loop)
+                self.exclusive_push(self.action.name, 0, self.action_loop)
                 self.exclusive_skip()
             # If queue empty and not looping, do nothing
             elif self.exclusive_empty():
@@ -215,10 +215,16 @@ class Model:
                 while((segments[row+5] < relative_st) if (segments[row] == 1) else (segments[row+1] < relative_st)):
                     if segments[row] == 0:
                         # Linear segment
-                        row += 3
+                        if len(segments) < row+3:
+                            continue
+                        else:
+                            row += 3
                     elif segments[row] == 1:
                         # Bezier segment
-                        row += 7
+                        if len(segments) < row+7:
+                            continue
+                        else:
+                            row += 7
                     elif segments[row] == 2 or segments[row] == 3:
                         raise ValueError('Stepped and inverse-stepped segments are unsupported')
                     else:
