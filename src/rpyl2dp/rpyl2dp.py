@@ -40,13 +40,32 @@ class Model:
 #                                                                                                                     #
 #######################################################################################################################
     
+    # Returns a dict of motions currently playing or queued
+    def list_active(self) -> dict[list[str]]:
+        values: dict = dict()
+        exclusives: list = list()
+        inclusives: list = list()
+        expressions: list = list()
+        if self.action is not None:
+            exclusives.append(self.action.name)
+        for (motion_name, wait_seconds, loop) in list(self.exclusive.exclusive_queue.queue):
+            exclusives.append(motion_name)
+        for (k, v) in self.inclusive.inclusive_dict.items():
+            inclusives.append(k)
+        for (k, v) in self.active_expressions.expressions_dict.items():
+            expressions.append(k)
+        values['Exclusive motions'] = exclusives
+        values['Inclusive motions'] = inclusives
+        values['Expressions'] = expressions
+        return values
+
     # Push a motion to the exclusive queue
     def exclusive_push(self, motion_name: str, wait_seconds: float=0, loop: bool=True) -> None:
         self.exclusive.push(motion_name, wait_seconds, loop)
         return
     
     # Pop a motion from the exclusive queue
-    def exclusive_pop(self) -> tuple[float, str, bool]:
+    def exclusive_pop(self) -> tuple[str, float, bool]:
         return self.exclusive.pop()
     
     # Returns True if exclusive queue is empty
@@ -58,7 +77,7 @@ class Model:
         if self.exclusive_empty():
             return
         else:
-            (wait_seconds, motion_name, loop) = self.exclusive_pop()
+            (motion_name, wait_seconds, loop) = self.exclusive_pop()
             self.action = self.motions[motion_name]
             self.action_loop = loop
             self.action_start_time = self.st + wait_seconds
@@ -249,11 +268,6 @@ class Model:
                 else:
                     value = linear(relative_st, p0, p1)
                 values.append({'Target': target, 'Id': id, 'Value': value})
-
-        #elif isinstance(self.motions[motion_name], Expression):
-            # Find the value of every parameter of this expression ------------------------------------------------------------------------------- REFACTOR REQUIRED
-        #    values = self.motions[motion_name].parameters.copy()
-
         return values
 
 # Class for motions
@@ -303,15 +317,15 @@ class Exclusive:
         elif not isinstance(loop, bool):
             raise TypeError('Loop must be a bool')
         else:
-            self.exclusive_queue.put((float(wait_seconds), motion_name, loop))
+            self.exclusive_queue.put((motion_name, float(wait_seconds), loop))
             return
     
-    def pop(self) -> tuple[float, str, bool]:
+    def pop(self) -> tuple[str, float, bool]:
         if self.exclusive_queue.empty():
             return None
         else:
-            (wait_seconds, motion_name, loop) = self.exclusive_queue.get()
-            return (wait_seconds, motion_name, loop)
+            (motion_name, wait_seconds, loop) = self.exclusive_queue.get()
+            return (motion_name, wait_seconds, loop)
 
 # Inclusive animations use a dict. All inclusive animations in the dict can play simultaneously.
 class Inclusive:
