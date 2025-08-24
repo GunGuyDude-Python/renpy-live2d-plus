@@ -91,6 +91,7 @@ class Model:
         self.force_persistence(renpy_model)
         self.animate_exclusive(renpy_model)
         self.animate_inclusive(renpy_model)
+        self.animate_expression(renpy_model)
         return 1.0/FPS
     
 #######################################################################################################################
@@ -189,7 +190,10 @@ class Model:
     
     # Call every frame to set expressions
     def animate_expression(self, renpy_model) -> None:
-        pass #--------------------------------------------------------------------------------------------------------------------------------------WIP
+        for expression_name, (fade_in_time, fade_out_time) in self.active_expressions.expressions_dict.items():
+            for param in self.expressions[expression_name].parameters:
+                renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
+        return
 
     # Find the value of every parameter of this motion at this second
     def second(self, motion_name: str, relative_st: float) -> list[dict]:
@@ -377,7 +381,7 @@ def load_model(folder_path: str) -> Model:
             expression_path = path.join(expressions_dir, expression_entry)
             if path.isfile(expression_path):
                 expression = load_expression(expression_path)
-                model.motions[expression.name] = expression
+                model.expressions[expression.name] = expression
     
     # Folder not found or Live2D files not found
     else:
