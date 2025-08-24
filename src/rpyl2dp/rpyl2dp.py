@@ -49,6 +49,10 @@ class Model:
     def exclusive_pop(self) -> tuple[float, str, bool]:
         return self.exclusive.pop()
     
+    # Returns True if exclusive queue is empty
+    def exclusive_empty(self) -> bool:
+        return self.exclusive.exclusive_queue.empty()
+
     # Skip playing the current motion
     def exclusive_skip(self) -> None:
         if self.exclusive_empty():
@@ -60,10 +64,11 @@ class Model:
             self.action_start_time = self.st + wait_seconds
             self.action_end_time = self.action_start_time + self.action.duration
             return
-    
-    # Returns True if exclusive queue is empty
-    def exclusive_empty(self) -> bool:
-        return self.exclusive.exclusive_queue.empty()
+        
+    # Skip all motions in the queue
+    def exclusive_skipall(self) -> None:
+        while(not self.exclusive_empty()):
+            self.exclusive_skip()
     
     # Add a motion to the inclusive set
     def inclusive_add(self, motion_name: str, min_seconds: float=0, max_seconds: float=0) -> None:
