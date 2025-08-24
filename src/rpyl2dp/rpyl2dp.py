@@ -215,18 +215,19 @@ class Model:
                 id = curve['Id']
                 segments = curve['Segments']
                 row = 2
-
-                while((segments[row+5] < relative_st) if (segments[row] == 1) else (segments[row+1] < relative_st)):
+                
+                loop = True
+                while(loop):
                     if segments[row] == 0:
                         # Linear segment
-                        if len(segments) < row+3:
-                            continue
+                        if relative_st < segments[row+1] or len(segments) <= row+3:
+                            loop = False
                         else:
                             row += 3
                     elif segments[row] == 1:
                         # Bezier segment
-                        if len(segments) < row+7:
-                            continue
+                        if relative_st < segments[row+5] or len(segments) <= row+7:
+                            loop = False
                         else:
                             row += 7
                     elif segments[row] == 2 or segments[row] == 3:
