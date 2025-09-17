@@ -75,6 +75,10 @@ class Model:
     # Skip playing the current motion
     def exclusive_skip(self) -> None:
         if self.exclusive_empty():
+            self.action = None
+            self.action_loop = False
+            self.action_start_time = 0.0
+            self.action_end_time = 0.0
             return
         else:
             (motion_name, wait_seconds, loop) = self.exclusive_pop()
@@ -88,6 +92,7 @@ class Model:
     def exclusive_skipall(self) -> None:
         while(not self.exclusive_empty()):
             self.exclusive_skip()
+        self.exclusive_skip()
     
     # Add a motion to the inclusive set
     def inclusive_add(self, motion_name: str, min_seconds: float=0, max_seconds: float=0) -> None:
