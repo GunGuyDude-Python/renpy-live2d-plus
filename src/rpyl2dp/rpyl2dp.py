@@ -104,6 +104,10 @@ class Model:
         self.inclusive.remove(motion_name)
         return
     
+    # Remove all motions from the inclusive set
+    def inclusive_removeall(self) -> None:
+        self.inclusive.inclusive_dict.clear()
+    
     # Activate an expression
     def expression_add(self, expression_name: str, fade_in_time: float=DEFAULT_FADE_TIME, fade_out_time: float=DEFAULT_FADE_TIME) -> None:
         self.active_expressions.add(expression_name, fade_in_time, fade_out_time)
@@ -113,6 +117,17 @@ class Model:
     def expression_remove(self, expression_name: str) -> None:
         self.active_expressions.remove(expression_name)
         return
+    
+    # Deactivate all expressions
+    def expression_removeall(self) -> None:
+        self.active_expressions.expressions_dict.clear()
+    
+    # Reset the model and its variables
+    def reset(self) -> None:
+        self.exclusive_skipall()
+        self.inclusive_removeall()
+        self.expression_removeall()
+        self.persistent.clear()
 
     # Call every frame to animate
     def update(self, renpy_model, st: float) -> float:
