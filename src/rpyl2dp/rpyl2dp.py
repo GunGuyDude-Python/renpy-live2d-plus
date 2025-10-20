@@ -8,9 +8,126 @@ global FPS
 FPS = 30.0
 global DEFAULT_FADE_TIME
 DEFAULT_FADE_TIME = 1.0
+global DEFAULT_TRANSITION_TIME
+DEFAULT_TRANSITION_TIME = 1.0
+
+#######################################################################################################################
+
+# Class for motions
+class Motion():
+    def __init__(self, name: str, duration: float, curves: list):
+        if not isinstance(name, str):
+            raise TypeError('Name must be a string')
+        elif not (isinstance(duration, float) or isinstance(duration, int)):
+            raise TypeError('Duration must be an float')
+        elif not isinstance(curves, list):
+            raise TypeError('Curves must be a list')
+        else:
+            self.name: str = name
+            self.duration: float = float(duration)
+            self.curves: list = curves
+            return
+    
+    def __str__(self):
+        return f'Name: {self.name}\nDuration: {self.duration}\nCurves: {self.curves}'
+
+# Class for expressions
+class Expression():
+    def __init__(self, name: str, parameters: list):
+        if not isinstance(name, str):
+            raise TypeError('Name must be a string')
+        elif not isinstance(parameters, list):
+            raise TypeError('Parameters must be a list')
+        else:
+            self.name: str = name
+            self.parameters: list = parameters
+            return
+        
+    def __str__(self):
+        return f'Name: {self.name}\nParameters: {self.parameters}'
+    
+# Exclusive animations use a FIFO queue. Exclusive animations can only play one at a time.
+class Exclusive:
+    def __init__(self):
+        self.exclusive_queue: queue.Queue = queue.Queue()
+        return
+
+    def push(self, motion_name: str, wait_seconds: float, loop: bool) -> None:
+        if not isinstance(motion_name, str):
+            raise TypeError('Motion name must be a string')
+        elif not (isinstance(wait_seconds, float) or isinstance(wait_seconds, int)):
+            raise TypeError('Wait seconds must be a float')
+        elif not isinstance(loop, bool):
+            raise TypeError('Loop must be a bool')
+        else:
+            self.exclusive_queue.put((motion_name, float(wait_seconds), loop))
+            return
+    
+    def pop(self) -> tuple[str, float, bool]:
+        if self.exclusive_queue.empty():
+            return None
+        else:
+            (motion_name, wait_seconds, loop) = self.exclusive_queue.get()
+            return (motion_name, wait_seconds, loop)
+
+# Inclusive animations use a dict. All inclusive animations in the dict can play simultaneously.
+class Inclusive:
+    def __init__(self):
+        self.inclusive_dict: dict = dict()
+        return
+
+    def add(self, motion_name: str, min_seconds: float, max_seconds: float) -> None:
+        if not isinstance(motion_name, str):
+            raise TypeError('Motion name must be a string')
+        elif not (isinstance(min_seconds, float) or isinstance(min_seconds, int)):
+            raise TypeError('Minimum seconds must be a float')
+        elif not (isinstance(max_seconds, float) or isinstance(max_seconds, int)):
+            raise TypeError('Maximum seconds must be a float')
+        else:
+            self.inclusive_dict[motion_name] = (float(min_seconds), float(max_seconds), 0.0, 0.0)
+            return
+
+    def remove(self, motion_name: str) -> None:
+        if not isinstance(motion_name, str):
+            raise TypeError('Motion name must be a string')
+        elif motion_name not in self.inclusive_dict:
+            return
+        else:
+            self.inclusive_dict.pop(motion_name)
+            return
+
+# Active expressions use a dict. All active expressions are shown simultaneously.
+class ActiveExpressions:
+    def __init__(self):
+        self.expressions_dict: dict = dict()
+        return
+    
+    def add(self, expression_name: str, fade_in_time: float, fade_out_time: float) -> None:
+        if not isinstance(expression_name, str):
+            raise TypeError('Expression name must be a string')
+        elif not (isinstance(fade_in_time, float) or isinstance(fade_in_time, int)):
+            raise TypeError('Fade in time must be a float')
+        elif not (isinstance(fade_out_time, float) or isinstance(fade_out_time, int)):
+            raise TypeError('Fade out time must be a float')
+        else:
+            self.expressions_dict[expression_name] = (float(fade_in_time), float(fade_out_time))
+            return
+
+    def remove(self, expression_name: str) -> None:
+        if not isinstance(expression_name, str):
+            raise TypeError('Expression name must be a string')
+        elif expression_name not in self.expressions_dict:
+            return
+        else:
+            self.expressions_dict.pop(expression_name)
+            return
+
+#######################################################################################################################
 
 class Model:
     def __init__(self, name: str):
+        if not isinstance(name, str):
+            raise TypeError('Model name must be a string')
         self.name: str = name
         self.motions: dict = dict()
         self.expressions: dict = dict()
@@ -23,6 +140,7 @@ class Model:
         self.action_loop: bool = False
         self.persistent: dict = dict()
         self.st: float = 0.0
+        self.sequential_name = 0
         return
     
     def __str__(self):
@@ -284,120 +402,55 @@ class Model:
                 if segments[row] == 1:
                     p2 = (segments[row+3], segments[row+4])
                     p3 = (segments[row+5], segments[row+6])
-                    value = cubic_bezier(relative_st, p0, p1, p2, p3)
+                    value = bezier(relative_st, p0, p1, p2, p3)
                 else:
                     value = linear(relative_st, p0, p1)
                 values.append({'Target': target, 'Id': id, 'Value': value})
         return values
 
-# Class for motions
-class Motion():
-    def __init__(self, name: str, duration: float, curves: list):
-        if not isinstance(name, str):
-            raise TypeError('Name must be a string')
+#######################################################################################################################
+
+    # Transition from the current pose to the beginning of the provided one
+    def transition_to(self, motion_name: str, type: str='bezier', duration: float=DEFAULT_TRANSITION_TIME) -> str:
+        if not isinstance(motion_name, str):
+            raise TypeError('Motion name must be a string')
+        elif motion_name not in self.motions:
+            raise KeyError(f'No motion with the name "{motion_name}" associated with model "{self.name}"')
+        if not isinstance(type, str):
+            raise TypeError('Type must be "linear" or "bezier"')
+        elif not (type == 'linear' or type == 'bezier'):
+            raise ValueError(f'"{type}" is not a valid type. Choose "linear" or "bezier"')
         elif not (isinstance(duration, float) or isinstance(duration, int)):
-            raise TypeError('Duration must be an float')
-        elif not isinstance(curves, list):
-            raise TypeError('Curves must be a list')
-        else:
-            self.name: str = name
-            self.duration: float = float(duration)
-            self.curves: list = curves
-            return
-    
-    def __str__(self):
-        return f'Name: {self.name}\nDuration: {self.duration}\nCurves: {self.curves}'
-
-# Class for expressions
-class Expression():
-    def __init__(self, name: str, parameters: list):
-        if not isinstance(name, str):
-            raise TypeError('Name must be a string')
-        elif not isinstance(parameters, list):
-            raise TypeError('Parameters must be a list')
-        else:
-            self.name: str = name
-            self.parameters: list = parameters
-            return
+            raise TypeError('Duration must be a float')
         
-    def __str__(self):
-        return f'Name: {self.name}\nParameters: {self.parameters}'
-    
-# Exclusive animations use a FIFO queue. Exclusive animations can only play one at a time.
-class Exclusive:
-    def __init__(self):
-        self.exclusive_queue: queue.Queue = queue.Queue()
-        return
+        transitions = dict()
+        for curve in self.motions[motion_name].curves:
+            target = curve['Target']
+            id = curve['Id']
+            segments = curve['Segments']
+            transitions[(target, id)] = segments[1]
 
-    def push(self, motion_name: str, wait_seconds: float, loop: bool) -> None:
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
-        elif not (isinstance(wait_seconds, float) or isinstance(wait_seconds, int)):
-            raise TypeError('Wait seconds must be a float')
-        elif not isinstance(loop, bool):
-            raise TypeError('Loop must be a bool')
-        else:
-            self.exclusive_queue.put((motion_name, float(wait_seconds), loop))
-            return
-    
-    def pop(self) -> tuple[str, float, bool]:
-        if self.exclusive_queue.empty():
-            return None
-        else:
-            (motion_name, wait_seconds, loop) = self.exclusive_queue.get()
-            return (motion_name, wait_seconds, loop)
+        for (target, id), value in self.persistent.items():
+            if (target, id) in transitions:
+                p31 = transitions[(target, id)]
+                p01 = value
+                if type == 'linear':
+                    transitions[(target, id)] = [0, p01, 0, duration, p31]
+                elif type == 'bezier':
+                    transitions[(target, id)] = [0, p01, 1, duration/3, p01, duration*2/3, p31, duration, p31]
+                else:
+                    raise ValueError()
+                
+        curves = list()
+        for (target, id) in transitions:
+            curves.append({'Target': target, 'Id': id, 'Segments': transitions[(target, id)]})
+        new_motion_name = 'transition' + str(self.sequential_name)
+        new_motion = Motion(new_motion_name, duration, curves)
+        self.motions[new_motion_name] = new_motion
+        
+        return new_motion_name
 
-# Inclusive animations use a dict. All inclusive animations in the dict can play simultaneously.
-class Inclusive:
-    def __init__(self):
-        self.inclusive_dict: dict = dict()
-        return
-
-    def add(self, motion_name: str, min_seconds: float, max_seconds: float) -> None:
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
-        elif not (isinstance(min_seconds, float) or isinstance(min_seconds, int)):
-            raise TypeError('Minimum seconds must be a float')
-        elif not (isinstance(max_seconds, float) or isinstance(max_seconds, int)):
-            raise TypeError('Maximum seconds must be a float')
-        else:
-            self.inclusive_dict[motion_name] = (float(min_seconds), float(max_seconds), 0.0, 0.0)
-            return
-
-    def remove(self, motion_name: str) -> None:
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
-        elif motion_name not in self.inclusive_dict:
-            return
-        else:
-            self.inclusive_dict.pop(motion_name)
-            return
-
-# Active expressions use a dict. All active expressions are shown simultaneously.
-class ActiveExpressions:
-    def __init__(self):
-        self.expressions_dict: dict = dict()
-        return
-    
-    def add(self, expression_name: str, fade_in_time: float, fade_out_time: float) -> None:
-        if not isinstance(expression_name, str):
-            raise TypeError('Expression name must be a string')
-        elif not (isinstance(fade_in_time, float) or isinstance(fade_in_time, int)):
-            raise TypeError('Fade in time must be a float')
-        elif not (isinstance(fade_out_time, float) or isinstance(fade_out_time, int)):
-            raise TypeError('Fade out time must be a float')
-        else:
-            self.expressions_dict[expression_name] = (float(fade_in_time), float(fade_out_time))
-            return
-
-    def remove(self, expression_name: str) -> None:
-        if not isinstance(expression_name, str):
-            raise TypeError('Expression name must be a string')
-        elif expression_name not in self.expressions_dict:
-            return
-        else:
-            self.expressions_dict.pop(expression_name)
-            return
+#######################################################################################################################
 
 # Static function
 # Load a Live2D model given its directory path
@@ -454,7 +507,7 @@ def linear(st: float, p0: tuple[float, float], p1: tuple[float, float]) -> float
 
 # Static function
 # Solve for y given st (x) in a cubic bezier
-def cubic_bezier(st: float, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float]) -> float:
+def bezier(st: float, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float]) -> float:
     # Normalise st to t
     t = (st-p0[0]) / (p3[0]-p0[0])
     y = (1-t)**3 * p0[1] + 3*t*(1-t)**2 * p1[1] + 3*(1-t)*t**2 * p2[1] + t**3 * p3[1]
