@@ -430,20 +430,25 @@ class Model:
             segments = curve['Segments']
             transitions[(target, id)] = segments[1]
 
-        for (target, id), value in self.persistent.items():
-            if (target, id) in transitions:
-                p31 = transitions[(target, id)]
-                p01 = value
-                if type == 'linear':
-                    transitions[(target, id)] = [0, p01, 0, duration, p31]
-                elif type == 'bezier':
-                    transitions[(target, id)] = [0, p01, 1, duration/3, p01, duration*2/3, p31, duration, p31]
-                else:
-                    raise ValueError()
+        if len(self.persistent) <= 0:
+            transitions.clear()
+            transitions[('Model', 'Opacity')] = [0, 1, 0, duration, 1]
+        else:
+            for (target, id) in transitions:
+                if (target, id) in self.persistent:
+                    p31 = transitions[(target, id)]
+                    p01 = self.persistent[(target, id)]
+                    if type == 'linear':
+                        transitions[(target, id)] = [0, p01, 0, duration, p31]
+                    elif type == 'bezier':
+                        transitions[(target, id)] = [0, p01, 1, duration/3, p01, duration*2/3, p31, duration, p31]
+                    else:
+                        raise ValueError()
                 
         curves = list()
         for (target, id) in transitions:
-            curves.append({'Target': target, 'Id': id, 'Segments': transitions[(target, id)]})
+            if isinstance(transitions[(target, id)], list):
+                curves.append({'Target': target, 'Id': id, 'Segments': transitions[(target, id)]})
         new_motion_name = 'transition' + str(self.sequential_name)
         self.sequential_name += 1
         new_motion = Motion(new_motion_name, duration, curves)
