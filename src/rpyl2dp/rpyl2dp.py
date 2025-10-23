@@ -445,6 +445,7 @@ class Model:
         for (target, id) in transitions:
             curves.append({'Target': target, 'Id': id, 'Segments': transitions[(target, id)]})
         new_motion_name = 'transition' + str(self.sequential_name)
+        self.sequential_name += 1
         new_motion = Motion(new_motion_name, duration, curves)
         self.motions[new_motion_name] = new_motion
         
