@@ -4,12 +4,9 @@ import json
 import queue
 import random
 
-global FPS
 FPS = 30.0
-global DEFAULT_FADE_TIME
-DEFAULT_FADE_TIME = 1.0
-global DEFAULT_TRANSITION_TIME
-DEFAULT_TRANSITION_TIME = 1.0
+default_fade_time = 1.0
+default_transition_time = 1.0
 
 #######################################################################################################################
 
@@ -227,7 +224,7 @@ class Model:
         self.inclusive.inclusive_dict.clear()
     
     # Activate an expression
-    def expression_add(self, expression_name: str, fade_in_time: float=DEFAULT_FADE_TIME, fade_out_time: float=DEFAULT_FADE_TIME) -> None:
+    def expression_add(self, expression_name: str, fade_in_time: float=default_fade_time, fade_out_time: float=default_fade_time) -> None:
         self.active_expressions.add(expression_name, fade_in_time, fade_out_time)
         return
     
@@ -249,6 +246,7 @@ class Model:
 
     # Call every frame to animate
     def update(self, renpy_model, st: float) -> float:
+        global FPS
         self.st = st
         self.force_persistence(renpy_model)
         self.animate_exclusive(renpy_model)
@@ -411,7 +409,8 @@ class Model:
 #######################################################################################################################
 
     # Transition from the current pose to the beginning of the provided one
-    def transition_to(self, motion_name: str, type: str='bezier', duration: float=DEFAULT_TRANSITION_TIME) -> str:
+    def transition_to(self, motion_name: str, type: str='bezier', duration: float=0) -> str:
+        global default_transition_time
         if not isinstance(motion_name, str):
             raise TypeError('Motion name must be a string')
         elif motion_name not in self.motions:
@@ -423,6 +422,8 @@ class Model:
         elif not (isinstance(duration, float) or isinstance(duration, int)):
             raise TypeError('Duration must be a float')
         
+        if duration <= 0:
+            duration = default_transition_time
         transitions = dict()
         for curve in self.motions[motion_name].curves:
             target = curve['Target']
@@ -502,6 +503,24 @@ def load_expression(file_path: str) -> Expression:
         data = json.load(file, parse_int=float)
         expression = Expression(path.basename(file_path).split('.')[0], data['Parameters'])
     return expression
+
+# Static function
+# Set the default fade duration
+def set_fade_default_time(duration: float) -> None:
+    global default_fade_time
+    if not (isinstance(duration, float) or isinstance(duration, int)):
+        raise TypeError('Duration must be a float')
+    default_fade_time = float(duration)
+    return
+
+# Static function
+# Set the default transition duration
+def set_transition_default_time(duration: float) -> None:
+    global default_transition_time
+    if not (isinstance(duration, float) or isinstance(duration, int)):
+        raise TypeError('Duration must be a float')
+    default_transition_time = float(duration)
+    return
 
 # Static function
 # Solve for y given st (x) in a linear equation
