@@ -1,5 +1,4 @@
-import os
-from os import path
+from pathlib import Path
 import json
 import queue
 import random
@@ -461,31 +460,32 @@ class Model:
 
 # Static function
 # Load a Live2D model given its directory path
-def load_model(folder_path: str) -> Model:
+def load_model(game_dir: str, file_name: str) -> Model:
+    live2d_path = Path(game_dir) / 'live2d' / file_name
     # Check if directory is a Live2D model folder
-    if path.isdir(folder_path) and path.isfile(path.join(folder_path, path.basename(folder_path) + '.model3.json')):
+    if live2d_path.is_dir() and (live2d_path / (file_name + '.model3.json')).is_file():
         # Create an empty model
-        model = Model(path.basename(folder_path).split('.')[0])
-        motions_dir = path.join(folder_path, 'Motions')
-        expressions_dir = path.join(folder_path, 'Expressions')
+        model = Model(file_name)
+        motions_dir = live2d_path / 'Motions'
+        expressions_dir = live2d_path / 'Expressions'
 
         # Read each motion and populate the model
-        for motion_entry in os.listdir(motions_dir):
-            motion_path = path.join(motions_dir, motion_entry)
-            if path.isfile(motion_path):
+        for motion_entry in motions_dir.iterdir():
+            motion_path = motions_dir / motion_entry
+            if motion_path.is_file():
                 motion = load_motion(motion_path)
-                model.motions[motion.name] = motion
+                model.motions[motion.name.split('.')[0]] = motion
 
         # Read each expression and populate the model
-        for expression_entry in os.listdir(expressions_dir):
-            expression_path = path.join(expressions_dir, expression_entry)
-            if path.isfile(expression_path):
+        for expression_entry in expressions_dir.iterdir():
+            expression_path = expressions_dir / expression_entry
+            if expression_path.is_file():
                 expression = load_expression(expression_path)
-                model.expressions[expression.name] = expression
+                model.expressions[expression.name.split('.')[0]] = expression
     
     # Folder not found or Live2D files not found
     else:
-        raise OSError('Live2D model not found')
+        raise OSError(f'{live2d_path} is not a valid path')
     return model
 
 # Static function
@@ -493,7 +493,7 @@ def load_model(folder_path: str) -> Model:
 def load_motion(file_path: str) -> Motion:
     with open(file_path, 'r') as file:
         data = json.load(file, parse_int=float)
-        motion = Motion(path.basename(file_path).split('.')[0], data['Meta']['Duration'], data['Curves'])
+        motion = Motion(file_path.name.split('.')[0], data['Meta']['Duration'], data['Curves'])
     return motion
 
 # Static function
@@ -501,7 +501,7 @@ def load_motion(file_path: str) -> Motion:
 def load_expression(file_path: str) -> Expression:
     with open(file_path, 'r') as file:
         data = json.load(file, parse_int=float)
-        expression = Expression(path.basename(file_path).split('.')[0], data['Parameters'])
+        expression = Expression(file_path.name.split('.')[0], data['Parameters'])
     return expression
 
 # Static function
