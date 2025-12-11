@@ -416,7 +416,7 @@ class Model:
 #######################################################################################################################
 
     # Transition from the current pose to the beginning of the provided one
-    def transition_to(self, motion_name: str, type: str='bezier', duration: float=0) -> str:
+    def transition_and_push(self, motion_name: str, type: str='bezier', duration: float=0) -> None:
         global default_transition_time
         if not isinstance(motion_name, str):
             raise TypeError('Motion name must be a string')
@@ -469,7 +469,8 @@ class Model:
         new_motion = Motion(transition_motion_name, duration, curves)
         self.motions[transition_motion_name] = new_motion
         
-        return transition_motion_name
+        self.exclusive_push(transition_motion_name)
+        self.exclusive_push(motion_name, skip_seconds=duration)
 
 #######################################################################################################################
 
