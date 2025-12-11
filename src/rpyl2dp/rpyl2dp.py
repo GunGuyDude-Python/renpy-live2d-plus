@@ -506,7 +506,7 @@ def load_model(game_dir: str, file_name: str) -> Model:
 
 # Static function
 # Load a Live2D motion given its directory path
-def load_motion(file_path: str) -> Motion:
+def load_motion(file_path: Path) -> Motion:
     with open(file_path, 'r') as file:
         data = json.load(file, parse_int=float)
         motion = Motion(file_path.name.split('.')[0], data['Meta']['Duration'], data['Curves'])
@@ -514,7 +514,7 @@ def load_motion(file_path: str) -> Motion:
 
 # Static function
 # Load a Live2D expression given its directory path
-def load_expression(file_path: str) -> Expression:
+def load_expression(file_path: Path) -> Expression:
     with open(file_path, 'r') as file:
         data = json.load(file, parse_int=float)
         expression = Expression(file_path.name.split('.')[0], data['Parameters'])
