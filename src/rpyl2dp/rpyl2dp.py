@@ -48,23 +48,25 @@ class Exclusive:
         self.exclusive_queue: queue.Queue = queue.Queue()
         return
 
-    def push(self, motion_name: str, wait_seconds: float, loop: bool) -> None:
+    def push(self, motion_name: str, wait_seconds: float, skip_seconds: float, loop: bool) -> None:
         if not isinstance(motion_name, str):
             raise TypeError('Motion name must be a string')
         elif not (isinstance(wait_seconds, float) or isinstance(wait_seconds, int)):
             raise TypeError('Wait seconds must be a float')
+        elif not (isinstance(skip_seconds, float) or isinstance(skip_seconds, int)):
+            raise TypeError('Skip seconds must be a float')
         elif not isinstance(loop, bool):
             raise TypeError('Loop must be a bool')
         else:
-            self.exclusive_queue.put((motion_name, float(wait_seconds), loop))
+            self.exclusive_queue.put((motion_name, float(wait_seconds), float(skip_seconds), loop))
             return
     
-    def pop(self) -> tuple[str, float, bool]:
+    def pop(self) -> tuple[str, float, float, bool]:
         if self.exclusive_queue.empty():
             return None
         else:
-            (motion_name, wait_seconds, loop) = self.exclusive_queue.get()
-            return (motion_name, wait_seconds, loop)
+            (motion_name, wait_seconds, skip_seconds, loop) = self.exclusive_queue.get()
+            return (motion_name, wait_seconds, skip_seconds, loop)
 
 # Inclusive animations use a dict. All inclusive animations in the dict can play simultaneously.
 class Inclusive:
@@ -133,6 +135,7 @@ class Model:
         self.action: Motion = None
         self.action_start_time: float = 0.0
         self.action_end_time: float = 0.0
+        self.action_skip_time: float = 0.0
         self.action_loop: bool = False
         self.persistent: dict = dict()
         self.st: float = 0.0
@@ -174,12 +177,12 @@ class Model:
         return values
 
     # Push a motion to the exclusive queue
-    def exclusive_push(self, motion_name: str, wait_seconds: float=0, loop: bool=True) -> None:
-        self.exclusive.push(motion_name, wait_seconds, loop)
+    def exclusive_push(self, motion_name: str, wait_seconds: float=0, skip_seconds: float=0, loop: bool=True) -> None:
+        self.exclusive.push(motion_name, wait_seconds, skip_seconds, loop)
         return
     
     # Pop a motion from the exclusive queue
-    def exclusive_pop(self) -> tuple[str, float, bool]:
+    def exclusive_pop(self) -> tuple[str, float, float, bool]:
         return self.exclusive.pop()
     
     # Returns True if exclusive queue is empty
@@ -190,16 +193,21 @@ class Model:
     def exclusive_skip(self) -> None:
         if self.exclusive_empty():
             self.action = None
-            self.action_loop = False
             self.action_start_time = 0.0
             self.action_end_time = 0.0
+            self.action_skip_time = 0.0
+            self.action_loop = False
             return
         else:
-            (motion_name, wait_seconds, loop) = self.exclusive_pop()
+            (motion_name, wait_seconds, skip_seconds, loop) = self.exclusive_pop()
             self.action = self.motions[motion_name]
-            self.action_loop = loop
+            # Failsafe
+            if skip_seconds > self.action.duration:
+                skip_seconds = self.action.duration
             self.action_start_time = self.st + wait_seconds
-            self.action_end_time = self.action_start_time + self.action.duration
+            self.action_end_time = self.action_start_time + self.action.duration - skip_seconds
+            self.action_skip_time = skip_seconds
+            self.action_loop = loop
             return
         
     # Skip all motions in the queue
@@ -274,7 +282,7 @@ class Model:
         if self.st >= self.action_end_time:
             # If queue empty and looping, add motion to the queue again
             if self.exclusive_empty() and self.action_loop == True:
-                self.exclusive_push(self.action.name, 0, self.action_loop)
+                self.exclusive_push(self.action.name, 0, 0, self.action_loop)
                 self.exclusive_skip()
             # If queue empty and not looping, do nothing
             elif self.exclusive_empty():
@@ -286,7 +294,7 @@ class Model:
         
         # If currently playing a motion, set model parameters
         elif self.st >= self.action_start_time:
-            relative_st = self.st - self.action_start_time
+            relative_st = self.st - self.action_start_time + self.action_skip_time
             # Failsafe for if the motion has finished playing but program thinks it's still playing
             if relative_st > self.action.duration:
                 pass
@@ -423,12 +431,19 @@ class Model:
         
         if duration <= 0:
             duration = default_transition_time
+
         transitions = dict()
-        for curve in self.motions[motion_name].curves:
-            target = curve['Target']
-            id = curve['Id']
-            segments = curve['Segments']
-            transitions[(target, id)] = segments[1]
+        #for curve in self.motions[motion_name].curves:
+        #    target = curve['Target']
+        #    id = curve['Id']
+        #    segments = curve['Segments']
+        #    transitions[(target, id)] = segments[1]
+        goal_list = self.second(motion_name, duration)
+        for entry in goal_list:
+            target = entry['Target']
+            id = entry['Id']
+            value = entry['Value']
+            transitions[(target, id)] = value
 
         if len(self.persistent) <= 0:
             transitions.clear()
@@ -449,12 +464,12 @@ class Model:
         for (target, id) in transitions:
             if isinstance(transitions[(target, id)], list):
                 curves.append({'Target': target, 'Id': id, 'Segments': transitions[(target, id)]})
-        new_motion_name = 'transition' + str(self.sequential_name)
+        transition_motion_name = 'transition' + str(self.sequential_name)
         self.sequential_name += 1
-        new_motion = Motion(new_motion_name, duration, curves)
-        self.motions[new_motion_name] = new_motion
+        new_motion = Motion(transition_motion_name, duration, curves)
+        self.motions[transition_motion_name] = new_motion
         
-        return new_motion_name
+        return transition_motion_name
 
 #######################################################################################################################
 
