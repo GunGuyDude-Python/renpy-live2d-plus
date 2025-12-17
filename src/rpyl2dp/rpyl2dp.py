@@ -61,7 +61,7 @@ class Exclusive:
             self.exclusive_queue.put((motion_name, float(wait_seconds), float(skip_seconds), loop))
             return
     
-    def pop(self) -> tuple[str, float, float, bool]:
+    def pop(self) -> tuple[str, float, float, bool] | None:
         if self.exclusive_queue.empty():
             return None
         else:
@@ -132,7 +132,7 @@ class Model:
         self.exclusive: Exclusive = Exclusive()
         self.inclusive: Inclusive = Inclusive()
         self.active_expressions: ActiveExpressions = ActiveExpressions()
-        self.action: Motion = None
+        self.action: Motion | None = None
         self.action_start_time: float = 0.0
         self.action_end_time: float = 0.0
         self.action_skip_time: float = 0.0
@@ -158,11 +158,11 @@ class Model:
 #######################################################################################################################
     
     # Returns a dict of motions currently playing or queued
-    def list_active(self) -> dict[list[str]]:
+    def list_active(self) -> dict[str, list[str]]:
         values: dict = dict()
-        exclusives: list = list()
-        inclusives: list = list()
-        expressions: list = list()
+        exclusives: list[str] = list()
+        inclusives: list[str] = list()
+        expressions: list[str] = list()
         if self.action is not None:
             exclusives.append(self.action.name)
         for (motion_name, wait_seconds, loop) in list(self.exclusive.exclusive_queue.queue):
@@ -182,7 +182,7 @@ class Model:
         return
     
     # Pop a motion from the exclusive queue
-    def exclusive_pop(self) -> tuple[str, float, float, bool]:
+    def exclusive_pop(self) -> tuple[str, float, float, bool] | None:
         return self.exclusive.pop()
     
     # Returns True if exclusive queue is empty
@@ -199,13 +199,15 @@ class Model:
             self.action_loop = False
             return
         else:
-            (motion_name, wait_seconds, skip_seconds, loop) = self.exclusive_pop()
+            popped = self.exclusive_pop()
+            assert popped is not None
+            (motion_name, wait_seconds, skip_seconds, loop) = popped
             self.action = self.motions[motion_name]
             # Failsafe
-            if skip_seconds > self.action.duration:
-                skip_seconds = self.action.duration
+            if skip_seconds > self.action.duration:     # type: ignore
+                skip_seconds = self.action.duration     # type: ignore
             self.action_start_time = self.st + wait_seconds
-            self.action_end_time = self.action_start_time + self.action.duration - skip_seconds
+            self.action_end_time = self.action_start_time + self.action.duration - skip_seconds     # type: ignore
             self.action_skip_time = skip_seconds
             self.action_loop = loop
             return
@@ -282,7 +284,7 @@ class Model:
         if self.st >= self.action_end_time:
             # If queue empty and looping, add motion to the queue again
             if self.exclusive_empty() and self.action_loop == True:
-                self.exclusive_push(self.action.name, 0, 0, self.action_loop)
+                self.exclusive_push(self.action.name, 0, 0, self.action_loop)   # type: ignore
                 self.exclusive_skip()
             # If queue empty and not looping, do nothing
             elif self.exclusive_empty():
@@ -296,10 +298,10 @@ class Model:
         elif self.st >= self.action_start_time:
             relative_st = self.st - self.action_start_time + self.action_skip_time
             # Failsafe for if the motion has finished playing but program thinks it's still playing
-            if relative_st > self.action.duration:
+            if relative_st > self.action.duration:      # type: ignore
                 pass
             else:
-                params = self.second(self.action.name, relative_st)
+                params = self.second(self.action.name, relative_st)     # type: ignore
                 for param in params:
                     # Model opacity
                     if param['Target'] == 'Model' and param['Id'] == 'Opacity':
@@ -432,12 +434,8 @@ class Model:
         if duration <= 0:
             duration = default_transition_time
 
+        # Figure out the end state
         transitions = dict()
-        #for curve in self.motions[motion_name].curves:
-        #    target = curve['Target']
-        #    id = curve['Id']
-        #    segments = curve['Segments']
-        #    transitions[(target, id)] = segments[1]
         goal_list = self.second(motion_name, duration)
         for entry in goal_list:
             target = entry['Target']
@@ -445,9 +443,11 @@ class Model:
             value = entry['Value']
             transitions[(target, id)] = value
 
+        # Failsafe for model in default pose
         if len(self.persistent) <= 0:
             transitions.clear()
             transitions[('Model', 'Opacity')] = [0, 1, 0, duration, 1]
+        # Otherwise draw curves for transition animation
         else:
             for (target, id) in transitions:
                 if (target, id) in self.persistent:
@@ -460,6 +460,7 @@ class Model:
                     else:
                         raise ValueError()
                 
+        # Create a new motion and append calculated values
         curves = list()
         for (target, id) in transitions:
             if isinstance(transitions[(target, id)], list):
@@ -469,6 +470,7 @@ class Model:
         new_motion = Motion(transition_motion_name, duration, curves)
         self.motions[transition_motion_name] = new_motion
         
+        # Push motions to queue
         self.exclusive_push(transition_motion_name)
         self.exclusive_push(motion_name, skip_seconds=duration)
 
