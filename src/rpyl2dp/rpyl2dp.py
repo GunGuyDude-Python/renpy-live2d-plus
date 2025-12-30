@@ -138,6 +138,7 @@ class Model:
         self.action_skip_time: float = 0.0
         self.action_loop: bool = False
         self.persistent: dict = dict()
+        self.persistent_exp: dict = dict()
         self.st: float = 0.0
         self.sequential_name = 0
         return
@@ -360,8 +361,10 @@ class Model:
     # Call every frame to set expressions
     def animate_expression(self, renpy_model) -> None:
         for expression_name, (fade_in_time, fade_out_time) in self.active_expressions.expressions_dict.items():
+            self.fade_and_add(renpy_model, expression_name, 'bezier', duration=fade_in_time)
             for param in self.expressions[expression_name].parameters:
                 renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
+                #print(renpy_model.common.model.parameters['ParamClothing'].default)
         return
 
     # Find the value of every parameter of this motion at this second
@@ -473,6 +476,59 @@ class Model:
         # Push motions to queue
         self.exclusive_push(transition_motion_name)
         self.exclusive_push(motion_name, skip_seconds=duration)
+
+    def fade_and_add(self, renpy_model, expression_name: str, type: str='bezier', duration: float=0) -> None:
+        global default_fade_time
+        if not isinstance(expression_name, str):
+            raise TypeError('Expression name must be a string')
+        elif expression_name not in self.expressions:
+            raise KeyError(f'No motion with the name "{expression_name}" associated with model "{self.name}"')
+        if not isinstance(type, str):
+            raise TypeError('Type must be "linear" or "bezier"')
+        elif not (type == 'linear' or type == 'bezier'):
+            raise ValueError(f'"{type}" is not a valid type. Choose "linear" or "bezier"')
+        elif not (isinstance(duration, float) or isinstance(duration, int)):
+            raise TypeError('Duration must be a float')
+        
+        if duration <= 0:
+            duration = default_fade_time
+
+        fades = dict()
+        goal_list = [param for param in self.expressions[expression_name].parameters]
+        for entry in goal_list:
+            id = entry['Id']
+            if id not in self.persistent_exp:
+                self.persistent_exp[id] = renpy_model.common.model.parameters[id].default
+            value = entry['Value']
+            blend = entry['Blend']
+            if blend == 'Add':
+                value = self.persistent_exp[id] + value
+            elif blend == 'Overwrite':
+                pass
+            else:
+                raise ValueError('Expression blend must be "Add" or "Overwrite"')
+            fades[id] = value
+
+        for id in fades:
+            p31 = fades[id]
+            p01 = self.persistent_exp[id]
+            if type == 'linear':
+                fades[id] = [0, p01, 0, duration, p31]
+            elif type == 'bezier':
+                fades[id] = [0, p01, 1, duration/3, p01, duration*2/3, p31, duration, p31]
+            else:
+                raise ValueError()
+            
+        # Create a new motion and append calculated values
+        curves = list()
+        for id in fades:
+            if isinstance(fades[id], list):
+                curves.append({'Target': 'Parameter', 'Id': id, 'Segments': fades[id]})
+        print(curves)
+        fade_motion_name = 'fade' + str(self.sequential_name)
+        self.sequential_name += 1
+        new_motion = Motion(fade_motion_name, duration, curves)
+        self.motions[fade_motion_name] = new_motion
 
 #######################################################################################################################
 
