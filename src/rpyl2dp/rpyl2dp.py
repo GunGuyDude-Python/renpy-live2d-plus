@@ -98,17 +98,17 @@ class Inclusive:
 class ActiveExpressions:
     def __init__(self):
         self.expressions_dict: dict = dict()
+        self.next: tuple[str, float] | None = None
         return
     
-    def add(self, expression_name: str, fade_in_time: float, fade_out_time: float) -> None:
+    def add(self, expression_name: str, fade_in_time: float) -> None:
         if not isinstance(expression_name, str):
             raise TypeError('Expression name must be a string')
         elif not (isinstance(fade_in_time, float) or isinstance(fade_in_time, int)):
             raise TypeError('Fade in time must be a float')
-        elif not (isinstance(fade_out_time, float) or isinstance(fade_out_time, int)):
-            raise TypeError('Fade out time must be a float')
         else:
-            self.expressions_dict[expression_name] = (float(fade_in_time), float(fade_out_time))
+            #self.expressions_dict[expression_name] = float(fade_in_time)
+            self.next = (expression_name, float(fade_in_time))
             return
 
     def remove(self, expression_name: str) -> None:
@@ -138,6 +138,9 @@ class Model:
         self.action_skip_time: float = 0.0
         self.action_loop: bool = False
         self.persistent: dict = dict()
+        self.fading: str | None = None
+        self.fading_start_time: float = 0.0
+        self.fading_end_time: float = 0.0
         self.persistent_exp: dict = dict()
         self.st: float = 0.0
         self.sequential_name = 0
@@ -234,8 +237,8 @@ class Model:
         self.inclusive.inclusive_dict.clear()
     
     # Activate an expression
-    def expression_add(self, expression_name: str, fade_in_time: float=default_fade_time, fade_out_time: float=default_fade_time) -> None:
-        self.active_expressions.add(expression_name, fade_in_time, fade_out_time)
+    def expression_add(self, expression_name: str, fade_in_time: float=default_fade_time) -> None:
+        self.active_expressions.add(expression_name, fade_in_time)
         return
     
     # Deactivate an expression
@@ -360,12 +363,55 @@ class Model:
     
     # Call every frame to set expressions
     def animate_expression(self, renpy_model) -> None:
-        for expression_name, (fade_in_time, fade_out_time) in self.active_expressions.expressions_dict.items():
-            self.fade_and_add(renpy_model, expression_name, 'bezier', duration=fade_in_time)
-            for param in self.expressions[expression_name].parameters:
+        if self.active_expressions.next is not None:
+            (expression_name, fade_in_time) = self.active_expressions.next
+            self.active_expressions.expressions_dict[expression_name] = fade_in_time
+            self.active_expressions.next = None
+            if fade_in_time == 0:
+                goal_list = [param for param in self.expressions[expression_name].parameters]
+                for entry in goal_list:
+                    id = entry['Id']
+                    if id not in self.persistent_exp:
+                        self.persistent_exp[id] = renpy_model.common.model.parameters[id].default
+                    value = entry['Value']
+                    blend = entry['Blend']
+                    if blend == 'Add':
+                        value = self.persistent_exp[id] + value
+                    elif blend == 'Overwrite':
+                        pass
+                    else:
+                        raise ValueError('Expression blend must be "Add" or "Overwrite"')
+                    self.persistent_exp[id] = value
+            else:
+                self.fading = self.fade_and_add(renpy_model, expression_name, 'bezier', duration=fade_in_time)
+                self.fading_start_time = self.st
+                self.fading_end_time = self.st + fade_in_time
+
+        #for expression_name, fade_in_time in self.active_expressions.expressions_dict.items():
+        #    for param in self.expressions[expression_name].parameters:
+        #        renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
+        for id, value in self.persistent_exp.items():
+            renpy_model.blend_parameter(id, "Overwrite", value)
+
+        if self.st >= self.fading_end_time:
+            if self.fading is None:
+                pass
+            else:
+                self.fading = None
+                self.fading_start_time = 0.0
+                self.fading_end_time = 0.0
+            return
+
+        elif self.st >= self.fading_start_time:
+            relative_st = self.st - self.fading_start_time
+            assert self.fading
+            params = self.second(self.fading, relative_st)
+            for param in params:
                 renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
-                #print(renpy_model.common.model.parameters['ParamClothing'].default)
-        return
+            return
+
+        else:
+            return
 
     # Find the value of every parameter of this motion at this second
     def second(self, motion_name: str, relative_st: float) -> list[dict]:
@@ -477,7 +523,7 @@ class Model:
         self.exclusive_push(transition_motion_name)
         self.exclusive_push(motion_name, skip_seconds=duration)
 
-    def fade_and_add(self, renpy_model, expression_name: str, type: str='bezier', duration: float=0) -> None:
+    def fade_and_add(self, renpy_model, expression_name: str, type: str='bezier', duration: float=0) -> str:
         global default_fade_time
         if not isinstance(expression_name, str):
             raise TypeError('Expression name must be a string')
@@ -512,6 +558,7 @@ class Model:
         for id in fades:
             p31 = fades[id]
             p01 = self.persistent_exp[id]
+            self.persistent_exp[id] = fades[id]
             if type == 'linear':
                 fades[id] = [0, p01, 0, duration, p31]
             elif type == 'bezier':
@@ -524,11 +571,12 @@ class Model:
         for id in fades:
             if isinstance(fades[id], list):
                 curves.append({'Target': 'Parameter', 'Id': id, 'Segments': fades[id]})
-        print(curves)
         fade_motion_name = 'fade' + str(self.sequential_name)
         self.sequential_name += 1
         new_motion = Motion(fade_motion_name, duration, curves)
         self.motions[fade_motion_name] = new_motion
+
+        return fade_motion_name
 
 #######################################################################################################################
 
