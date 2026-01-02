@@ -98,7 +98,7 @@ class Inclusive:
 class ActiveExpressions:
     def __init__(self):
         self.expressions_dict: dict = dict()
-        self.next: tuple[str, float] | None = None
+        self.next: tuple[str, float, bool] | None = None
         return
     
     def add(self, expression_name: str, fade_in_time: float) -> None:
@@ -108,16 +108,19 @@ class ActiveExpressions:
             raise TypeError('Fade in time must be a float')
         else:
             #self.expressions_dict[expression_name] = float(fade_in_time)
-            self.next = (expression_name, float(fade_in_time))
+            self.next = (expression_name, float(fade_in_time), False)
             return
 
-    def remove(self, expression_name: str) -> None:
+    def remove(self, expression_name: str, fade_out_time) -> None:
         if not isinstance(expression_name, str):
             raise TypeError('Expression name must be a string')
+        elif not (isinstance(fade_out_time, float) or isinstance(fade_out_time, int)):
+            raise TypeError('Fade out time must be a float')
         elif expression_name not in self.expressions_dict:
             return
         else:
-            self.expressions_dict.pop(expression_name)
+            #self.expressions_dict.pop(expression_name)
+            self.next = (expression_name, float(fade_out_time), True)
             return
 
 #######################################################################################################################
@@ -242,8 +245,8 @@ class Model:
         return
     
     # Deactivate an expression
-    def expression_remove(self, expression_name: str) -> None:
-        self.active_expressions.remove(expression_name)
+    def expression_remove(self, expression_name: str, fade_out_time: float=default_fade_time) -> None:
+        self.active_expressions.remove(expression_name, fade_out_time)
         return
     
     # Deactivate all expressions
@@ -256,6 +259,15 @@ class Model:
         self.inclusive_removeall()
         self.expression_removeall()
         self.persistent.clear()
+        self.persistent_exp.clear()
+        self.action = None
+        self.action_start_time = 0.0
+        self.action_end_time = 0.0
+        self.action_skip_time = 0.0
+        self.action_loop = False
+        self.fading = None
+        self.fading_start_time = 0.0
+        self.fading_end_time = 0.0
 
     # Call every frame to animate
     def update(self, renpy_model, st: float) -> float:
@@ -364,10 +376,13 @@ class Model:
     # Call every frame to set expressions
     def animate_expression(self, renpy_model) -> None:
         if self.active_expressions.next is not None:
-            (expression_name, fade_in_time) = self.active_expressions.next
-            self.active_expressions.expressions_dict[expression_name] = fade_in_time
+            (expression_name, fade_time, is_fade_out) = self.active_expressions.next
+            if is_fade_out is True:
+                self.active_expressions.expressions_dict.pop(expression_name)
+            else:
+                self.active_expressions.expressions_dict[expression_name] = fade_time
             self.active_expressions.next = None
-            if fade_in_time == 0:
+            if fade_time == 0:
                 goal_list = [param for param in self.expressions[expression_name].parameters]
                 for entry in goal_list:
                     id = entry['Id']
@@ -376,16 +391,22 @@ class Model:
                     value = entry['Value']
                     blend = entry['Blend']
                     if blend == 'Add':
-                        value = self.persistent_exp[id] + value
+                        if is_fade_out is True:
+                            value = self.persistent_exp[id] - value
+                        else:
+                            value = self.persistent_exp[id] + value
                     elif blend == 'Overwrite':
-                        pass
+                        if is_fade_out is True:
+                            value = renpy_model.common.model.parameters[id].default
+                        else:
+                            pass
                     else:
                         raise ValueError('Expression blend must be "Add" or "Overwrite"')
                     self.persistent_exp[id] = value
             else:
-                self.fading = self.fade_and_add(renpy_model, expression_name, 'bezier', duration=fade_in_time)
+                self.fading = self.fade_and_add(renpy_model, expression_name, 'bezier', duration=fade_time, is_fade_out=is_fade_out)
                 self.fading_start_time = self.st
-                self.fading_end_time = self.st + fade_in_time
+                self.fading_end_time = self.st + fade_time
 
         #for expression_name, fade_in_time in self.active_expressions.expressions_dict.items():
         #    for param in self.expressions[expression_name].parameters:
@@ -523,7 +544,7 @@ class Model:
         self.exclusive_push(transition_motion_name)
         self.exclusive_push(motion_name, skip_seconds=duration)
 
-    def fade_and_add(self, renpy_model, expression_name: str, type: str='bezier', duration: float=0) -> str:
+    def fade_and_add(self, renpy_model, expression_name: str, type: str='bezier', duration: float=0, is_fade_out: bool=False) -> str:
         global default_fade_time
         if not isinstance(expression_name, str):
             raise TypeError('Expression name must be a string')
@@ -548,9 +569,15 @@ class Model:
             value = entry['Value']
             blend = entry['Blend']
             if blend == 'Add':
-                value = self.persistent_exp[id] + value
+                if is_fade_out is True:
+                    value = self.persistent_exp[id] - value
+                else:
+                    value = self.persistent_exp[id] + value
             elif blend == 'Overwrite':
-                pass
+                if is_fade_out is True:
+                    value = renpy_model.common.model.parameters[id].default
+                else:
+                    pass
             else:
                 raise ValueError('Expression blend must be "Add" or "Overwrite"')
             fades[id] = value
