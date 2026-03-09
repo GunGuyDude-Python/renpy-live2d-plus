@@ -60,8 +60,31 @@ class Segment:
                 ptr += 3
         return output
 
+# Class for Motion curves.
 class Curve:
-    pass
+    def __init__(self, target: str, id: str, segments: list[Segment]) -> None:
+        self.target: str = target
+        self.id: str = id
+        self.segments: list[Segment] = segments
+        return
+
+    def __str__(self) -> str:
+        output: str = f'Target: {self.target}\nID: {self.id}\n'
+        for segment in self.segments:
+            output += f'\n'
+            output += segment.__str__()
+        return output
+    
+    # Read raw list and return instantiated curve objects in a list
+    @staticmethod
+    def load(input: list[dict]) -> list[Curve]:
+        output: list[Curve] = list()
+        for curve in input:
+            target: str = str(curve['Target'])
+            id: str = str(curve['Id'])
+            segments: list[Segment] = Segment.load(curve['Segments'])
+            output.append(Curve(target, id, segments))
+        return output
 
 class Motion:
     pass
