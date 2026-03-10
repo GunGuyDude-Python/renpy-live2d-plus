@@ -10,7 +10,7 @@ default_transition_time = 1.0
 
 #######################################################################################################################
 
-# Class for Motion segments.
+# Class for motion segments.
 # For type, 0 = linear, 1 = bezier, 2 = stepped, 3 = inverse stepped
 # For each vertex, v[0] is time, v[1] is value
 # v1 & v2 are only used for bezier type
@@ -31,36 +31,36 @@ class Segment:
     def __str__(self) -> str:
         output: str = f'Type: {self.type}\n'
         output += f'Starting vertex: t={self.v0[0]}, val={self.v0[1]}\n'
-        output += f'Stopping vertex: t={self.v3[0]}, val={self.v3[1]}'
-        if self.type is 1:
-            output += f'\nBezier vertex 1: t={self.v1[0]}, val={self.v1[1]}\n'
-            output += f'Bezier vertex 2: t={self.v2[0]}, val={self.v2[1]}'
+        if self.type == 1:
+            output += f'Bezier vertex 1: t={self.v1[0]}, val={self.v1[1]}\n'
+            output += f'Bezier vertex 2: t={self.v2[0]}, val={self.v2[1]}\n'
+        output += f'Stopping vertex: t={self.v3[0]}, val={self.v3[1]}\n'
         return output
     
     # Read raw list and return instantiated segment objects in a list
     @staticmethod
     def load(input: list[float]) -> list[Segment]:
-        casted = [float(x) for x in input]
         output: list[Segment] = list()
         ptr: int = 0
         while (ptr+2 < len(input)):
-            type: int = int(casted[ptr+2])
-            v0: tuple[float, float] = (casted[ptr], casted[ptr+1])
+            # Uncast the type variable, very cursed
+            type: int = int(input[ptr+2])
+            v0: tuple[float, float] = (input[ptr], input[ptr+1])
             # Bezier type
-            if type is 1:
-                v1: tuple[float, float] = (casted[ptr+3], casted[ptr+4])
-                v2: tuple[float, float] = (casted[ptr+5], casted[ptr+6])
-                v3: tuple[float, float] = (casted[ptr+7], casted[ptr+8])
+            if type == 1:
+                v1: tuple[float, float] = (input[ptr+3], input[ptr+4])
+                v2: tuple[float, float] = (input[ptr+5], input[ptr+6])
+                v3: tuple[float, float] = (input[ptr+7], input[ptr+8])
                 output.append(Segment(type, v0, v1=v1, v2=v2, v3=v3))
                 ptr += 7
             # Linear or stepped type
             else:
-                v3: tuple[float, float] = (casted[ptr+3], casted[ptr+4])
+                v3: tuple[float, float] = (input[ptr+3], input[ptr+4])
                 output.append(Segment(type, v0, v3))
                 ptr += 3
         return output
 
-# Class for Motion curves.
+# Class for motion curves.
 class Curve:
     def __init__(self, target: str, id: str, segments: list[Segment]) -> None:
         self.target: str = target
@@ -69,25 +69,44 @@ class Curve:
         return
 
     def __str__(self) -> str:
-        output: str = f'Target: {self.target}\nID: {self.id}\n'
+        output: str = f'\nTarget: {self.target}\nID: {self.id}\n'
         for segment in self.segments:
-            output += f'\n'
             output += segment.__str__()
         return output
     
     # Read raw list and return instantiated curve objects in a list
     @staticmethod
-    def load(input: list[dict]) -> list[Curve]:
-        output: list[Curve] = list()
+    def load(input: list[dict]) -> dict[tuple[str, str], Curve]:
+        output: dict[tuple[str, str], Curve] = dict()
         for curve in input:
             target: str = str(curve['Target'])
             id: str = str(curve['Id'])
             segments: list[Segment] = Segment.load(curve['Segments'])
-            output.append(Curve(target, id, segments))
+            output[(target, id)] = Curve(target, id, segments)
         return output
 
+# Class for model motions
 class Motion:
-    pass
+    def __init__(self, name: str, duration: float, curves: dict[tuple[str, str], Curve]) -> None:
+        self.name: str = name
+        self.duration: float = duration
+        self.curves: dict[tuple[str, str], Curve] = curves
+        return
+    
+    def __str__(self) -> str:
+        output: str = f'\n\n\nMotion name: {self.name}\nDuration: {self.duration}\n'
+        for curve in self.curves.values():
+            output += curve.__str__()
+        return output
+
+    # Read from file and return instantiated motion object
+    @staticmethod
+    def load(file_path: Path) -> Motion:
+        with open(file_path, 'r') as file:
+            data = json.load(file, parse_int=float)
+            curves = Curve.load(data['Curves'])
+            motion = Motion(file_path.name.split('.')[0], data['Meta']['Duration'], curves)
+        return motion
 
 class Param:
     pass
@@ -95,16 +114,44 @@ class Param:
 class Expression:
     pass
 
+# Class for model
 class Model:
     def __init__(self, name: str):
-        if not isinstance(name, str):
-            raise TypeError('Model name must be a string')
         self.name: str = name
+        self.motions: dict[str, Motion] = dict()
         return
     
-    def __str__(self):
-        out: str = str()
-        return out
+    def __str__(self) -> str:
+        output: str = f'Model name: {self.name}'
+        for motion in self.motions.values():
+            output += motion.__str__()
+        return output
+    
+    @staticmethod
+    def load(game_dir: str, file_name: str) -> Model:
+        live2d_path = Path(game_dir) / 'live2d' / file_name
+        # Check if directory is a Live2D model folder
+        if live2d_path.is_dir() and (live2d_path / (file_name + '.model3.json')).is_file():
+            # Create an empty model
+            model = Model(file_name)
+            motions_dir = live2d_path / 'Motions'
+            expressions_dir = live2d_path / 'Expressions'
+            # Read each motion and populate the model
+            for motion_entry in motions_dir.iterdir():
+                motion_path = motions_dir / motion_entry
+                if motion_path.is_file():
+                    motion = Motion.load(motion_path)
+                    model.motions[motion.name.split('.')[0]] = motion
+            # Read each expression and populate the model
+            #for expression_entry in expressions_dir.iterdir():
+            #    expression_path = expressions_dir / expression_entry
+            #    if expression_path.is_file():
+            #        expression = load_expression(expression_path)
+            #        model.expressions[expression.name.split('.')[0]] = expression
+        # Folder not found or Live2D files not found
+        else:
+            raise OSError(f'{live2d_path} is not a valid path')
+        return model
     
 #######################################################################################################################
 #                                                                                                                     #
@@ -115,52 +162,6 @@ class Model:
 
 
 #######################################################################################################################
-
-# Static function
-# Load a Live2D model given its directory path
-def load_model(game_dir: str, file_name: str) -> Model:
-    live2d_path = Path(game_dir) / 'live2d' / file_name
-    # Check if directory is a Live2D model folder
-    if live2d_path.is_dir() and (live2d_path / (file_name + '.model3.json')).is_file():
-        # Create an empty model
-        model = Model(file_name)
-        motions_dir = live2d_path / 'Motions'
-        expressions_dir = live2d_path / 'Expressions'
-
-        # Read each motion and populate the model
-        for motion_entry in motions_dir.iterdir():
-            motion_path = motions_dir / motion_entry
-            if motion_path.is_file():
-                motion = load_motion(motion_path)
-                model.motions[motion.name.split('.')[0]] = motion
-
-        # Read each expression and populate the model
-        for expression_entry in expressions_dir.iterdir():
-            expression_path = expressions_dir / expression_entry
-            if expression_path.is_file():
-                expression = load_expression(expression_path)
-                model.expressions[expression.name.split('.')[0]] = expression
-    
-    # Folder not found or Live2D files not found
-    else:
-        raise OSError(f'{live2d_path} is not a valid path')
-    return model
-
-# Static function
-# Load a Live2D motion given its directory path
-def load_motion(file_path: Path) -> Motion:
-    with open(file_path, 'r') as file:
-        data = json.load(file, parse_int=float)
-        motion = Motion(file_path.name.split('.')[0], data['Meta']['Duration'], data['Curves'])
-    return motion
-
-# Static function
-# Load a Live2D expression given its directory path
-def load_expression(file_path: Path) -> Expression:
-    with open(file_path, 'r') as file:
-        data = json.load(file, parse_int=float)
-        expression = Expression(file_path.name.split('.')[0], data['Parameters'])
-    return expression
 
 # Static function
 # Set the default fade duration
