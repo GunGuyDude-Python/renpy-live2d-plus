@@ -59,6 +59,36 @@ class Segment:
                 segments.append(Segment(type, v0, v3))
                 ptr += 3
         return segments
+    
+    # Solve for y given st (x) in a linear equation
+    @staticmethod
+    def linear(st: float, p0: tuple[float, float], p1: tuple[float, float]) -> float:
+        # Normalise st to t
+        t = (st-p0[0]) / (p1[0]-p0[0])
+        y = t*(p1[1]-p0[1]) + p0[1]
+        return y
+
+    # Solve for y given st (x) in a cubic bezier
+    @staticmethod
+    def bezier(st: float, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float]) -> float:
+        # Normalise st to t
+        t = (st-p0[0]) / (p3[0]-p0[0])
+        y = (1-t)**3 * p0[1] + 3*t*(1-t)**2 * p1[1] + 3*(1-t)*t**2 * p2[1] + t**3 * p3[1]
+        return y
+
+    # Solve for y given st (x) in a stepped function
+    @staticmethod
+    def stepped(st: float, p0: tuple[float, float], p1: tuple[float, float]) -> float:
+        # Stepped always returns value at first vertex
+        y = p0[1]
+        return y
+
+    # Solve for y given st (x) in a inverse stepped function
+    @staticmethod
+    def inv_stepped(st: float, p0: tuple[float, float], p1: tuple[float, float]) -> float:
+        # Inverse stepped always returns value at second vertex
+        y = p1[1]
+        return y
 
 # Class for motion curves.
 class Curve:
@@ -201,8 +231,8 @@ class Model:
 
 #######################################################################################################################
 
-# Static function
 # Set the default fade duration
+@staticmethod
 def set_fade_default_time(duration: float) -> None:
     global default_fade_time
     if not (isinstance(duration, float) or isinstance(duration, int)):
@@ -210,27 +240,11 @@ def set_fade_default_time(duration: float) -> None:
     default_fade_time = float(duration)
     return
 
-# Static function
 # Set the default transition duration
+@staticmethod
 def set_transition_default_time(duration: float) -> None:
     global default_transition_time
     if not (isinstance(duration, float) or isinstance(duration, int)):
         raise TypeError('Duration must be a float')
     default_transition_time = float(duration)
     return
-
-# Static function
-# Solve for y given st (x) in a linear equation
-def linear(st: float, p0: tuple[float, float], p1: tuple[float, float]) -> float:
-    # Normalise st to t
-    t = (st-p0[0]) / (p1[0]-p0[0])
-    y = t*(p1[1]-p0[1]) + p0[1]
-    return y
-
-# Static function
-# Solve for y given st (x) in a cubic bezier
-def bezier(st: float, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float]) -> float:
-    # Normalise st to t
-    t = (st-p0[0]) / (p3[0]-p0[0])
-    y = (1-t)**3 * p0[1] + 3*t*(1-t)**2 * p1[1] + 3*(1-t)*t**2 * p2[1] + t**3 * p3[1]
-    return y
