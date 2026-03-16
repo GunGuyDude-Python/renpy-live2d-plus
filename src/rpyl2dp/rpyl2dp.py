@@ -1,7 +1,8 @@
 from __future__ import annotations
 from pathlib import Path
 import json
-import queue
+from queue import Queue
+from typing import Any
 import random
 
 FPS = 30.0
@@ -265,6 +266,46 @@ class Model:
                 expression = Expression.load(expression_path)
                 model.expressions[expression.name.split('.')[0]] = expression
         return model
+    
+class Exclusive:
+    def __init__(self) -> None:
+        self.queue: Queue[dict[str, Any]] = Queue()
+        self.buffer: dict[str, Any] | None = None
+        return
+    
+    def push(self, motion: Motion, wait_seconds: float, skip_seconds: float, loop: bool) -> bool:
+        entry: dict[str, Any] = dict()
+        entry['motion'] = motion
+        entry['wait_seconds'] = wait_seconds
+        entry['skip_seconds'] = skip_seconds
+        entry['loop'] = loop
+        try:
+            self.queue.put(entry)
+        except:
+            return False
+        return True
+
+    def pop(self) -> dict[str, Any] | None:
+        if self.empty():
+            return None
+        return self.queue.get()
+
+    def members(self) -> list:
+        lst = list(self.queue.queue)
+        return lst
+
+    def length(self) -> float:
+        lst = list(self.queue.queue)
+        return len(lst)
+
+    def empty(self) -> bool:
+        return self.queue.empty()
+
+class Inclusive:
+    pass
+
+class ActiveExpr:
+    pass
     
 #######################################################################################################################
 #                                                                                                                     #
