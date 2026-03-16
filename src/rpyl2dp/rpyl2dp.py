@@ -37,6 +37,23 @@ class Segment:
         output += f'Stopping vertex: t={self.v3[0]}, val={self.v3[1]}\n'
         return output
     
+    def solve(self, st: float) -> float:
+        # Linear
+        if self.type == 0:
+            return self.linear(st, self.v0, self.v3)
+        # Bezier
+        elif self.type == 1:
+            return self.bezier(st, self.v0, self.v1, self.v2, self.v3)
+        # Stepped
+        elif self.type == 2:
+            return self.stepped(st, self.v0, self.v3)
+        # Inverse stepped
+        elif self.type == 3:
+            return self.inv_stepped(st, self.v0, self.v3)
+        # Exception
+        else:
+            raise ValueError(f'{self.type} is not a valid value for segment type.')
+    
     # Read raw list and return instantiated segment objects in a list
     @staticmethod
     def load(input: list[float]) -> list[Segment]:
