@@ -37,7 +37,15 @@ class Segment:
         output += f'Stopping vertex: t={self.v3[0]}, val={self.v3[1]}\n'
         return output
     
+    # Check if time is within bounds
+    def contains(self, st: float) -> bool:
+        return (self.v0[0] <= st < self.v3[0])
+
+    # Convert time to parameter value
     def solve(self, st: float) -> float:
+        # Raise exception if time is not within bounds
+        if (st < self.v0[0]) or (self.v3[0] < st):
+            raise ValueError(f'{st} is beyond segment bounds of ({self.v0[0]}, {self.v3[0]})')
         # Linear
         if self.type == 0:
             return self.linear(st, self.v0, self.v3)
@@ -121,6 +129,15 @@ class Curve:
             output += segment.__str__()
         return output
     
+    def solve(self, st: float) -> float:
+        if st < 0:
+            raise ValueError(f'Time of {st} cannot be smaller than 0')
+        for segment in self.segments:
+            if segment.contains(st):
+                return segment.solve(st)
+        # Pad remaining runtime with last valid value
+        return self.segments[-1].v3[1]
+
     # Read raw list and return instantiated curve objects in a dict
     @staticmethod
     def load(input: list[dict]) -> dict[tuple[str, str], Curve]:
@@ -145,6 +162,17 @@ class Motion:
         for curve in self.curves.values():
             output += curve.__str__()
         return output
+
+    def solve(self, st: float) -> dict[tuple[str, str], float]:
+        if st < 0:
+            raise ValueError(f'Time of {st} cannot be smaller than 0')
+        if st > self.duration:
+            raise ValueError(f'Time of {st} cannot be longer than motion duration')
+        values: dict[tuple[str, str], float] = dict()
+        for key, curve in self.curves.items():
+            value: float = curve.solve(st)
+            values[key] = value
+        return values
 
     # Read from file and return instantiated motion object
     @staticmethod
