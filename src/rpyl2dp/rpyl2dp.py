@@ -109,7 +109,27 @@ class Motion:
         return motion
 
 class Param:
-    pass
+    def __init__(self, id: str, value: float, blend: str='') -> None:
+        self.id: str = id
+        self.value: float = value
+        self.blend: str = 'Add'
+        if blend in ['Add', 'Overwrite']:
+            self.blend = blend
+        return
+    
+    def __str__(self) -> str:
+        output: str = f'ID: {self.id}\nValue: {self.value}\nBlend: {self.blend}\n'
+        return output
+    
+    @staticmethod
+    def load(input: list[dict]) -> dict[str, Param]:
+        output: dict[str, Param] = dict()
+        for param in input:
+            id: str = str(param['Id'])
+            value: float = float(param['Value'])
+            blend: str = str(param['Blend'])
+            output[id] = Param(id, value, blend)
+        return output
 
 class Expression:
     pass
