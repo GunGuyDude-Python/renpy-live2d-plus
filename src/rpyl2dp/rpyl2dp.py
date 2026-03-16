@@ -40,7 +40,7 @@ class Segment:
     # Read raw list and return instantiated segment objects in a list
     @staticmethod
     def load(input: list[float]) -> list[Segment]:
-        output: list[Segment] = list()
+        segments: list[Segment] = list()
         ptr: int = 0
         while (ptr+2 < len(input)):
             # Uncast the type variable, very cursed
@@ -51,14 +51,14 @@ class Segment:
                 v1: tuple[float, float] = (input[ptr+3], input[ptr+4])
                 v2: tuple[float, float] = (input[ptr+5], input[ptr+6])
                 v3: tuple[float, float] = (input[ptr+7], input[ptr+8])
-                output.append(Segment(type, v0, v1=v1, v2=v2, v3=v3))
+                segments.append(Segment(type, v0, v1=v1, v2=v2, v3=v3))
                 ptr += 7
             # Linear or stepped type
             else:
                 v3: tuple[float, float] = (input[ptr+3], input[ptr+4])
-                output.append(Segment(type, v0, v3))
+                segments.append(Segment(type, v0, v3))
                 ptr += 3
-        return output
+        return segments
 
 # Class for motion curves.
 class Curve:
@@ -74,16 +74,16 @@ class Curve:
             output += segment.__str__()
         return output
     
-    # Read raw list and return instantiated curve objects in a list
+    # Read raw list and return instantiated curve objects in a dict
     @staticmethod
     def load(input: list[dict]) -> dict[tuple[str, str], Curve]:
-        output: dict[tuple[str, str], Curve] = dict()
+        curves: dict[tuple[str, str], Curve] = dict()
         for curve in input:
             target: str = str(curve['Target'])
             id: str = str(curve['Id'])
             segments: list[Segment] = Segment.load(curve['Segments'])
-            output[(target, id)] = Curve(target, id, segments)
-        return output
+            curves[(target, id)] = Curve(target, id, segments)
+        return curves
 
 # Class for model motions
 class Motion:
@@ -121,24 +121,44 @@ class Param:
         output: str = f'ID: {self.id}\nValue: {self.value}\nBlend: {self.blend}\n'
         return output
     
+    # Read raw list and return instantiated param objects in a dict
     @staticmethod
     def load(input: list[dict]) -> dict[str, Param]:
-        output: dict[str, Param] = dict()
+        params: dict[str, Param] = dict()
         for param in input:
             id: str = str(param['Id'])
             value: float = float(param['Value'])
             blend: str = str(param['Blend'])
-            output[id] = Param(id, value, blend)
-        return output
+            params[id] = Param(id, value, blend)
+        return params
 
 class Expression:
-    pass
+    def __init__(self, name: str, params: dict[str, Param]) -> None:
+        self.name: str = name
+        self.params: dict[str, Param] = params
+        return
+    
+    def __str__(self) -> str:
+        output: str = f'\n\n\nExpression name: {self.name}\n'
+        for param in self.params.values():
+            output += param.__str__()
+        return output
+    
+    # Read from file and return instantiated expression object
+    @staticmethod
+    def load(file_path: Path) -> Expression:
+        with open(file_path, 'r') as file:
+            data = json.load(file, parse_int=float)
+            params = Param.load(data['Parameters'])
+            expression = Expression(file_path.name.split('.')[0], params)
+        return expression
 
 # Class for model
 class Model:
     def __init__(self, name: str):
         self.name: str = name
         self.motions: dict[str, Motion] = dict()
+        self.expressions: dict[str, Expression] = dict()
         return
     
     def __str__(self) -> str:
@@ -151,26 +171,24 @@ class Model:
     def load(game_dir: str, file_name: str) -> Model:
         live2d_path = Path(game_dir) / 'live2d' / file_name
         # Check if directory is a Live2D model folder
-        if live2d_path.is_dir() and (live2d_path / (file_name + '.model3.json')).is_file():
-            # Create an empty model
-            model = Model(file_name)
-            motions_dir = live2d_path / 'Motions'
-            expressions_dir = live2d_path / 'Expressions'
-            # Read each motion and populate the model
-            for motion_entry in motions_dir.iterdir():
-                motion_path = motions_dir / motion_entry
-                if motion_path.is_file():
-                    motion = Motion.load(motion_path)
-                    model.motions[motion.name.split('.')[0]] = motion
-            # Read each expression and populate the model
-            #for expression_entry in expressions_dir.iterdir():
-            #    expression_path = expressions_dir / expression_entry
-            #    if expression_path.is_file():
-            #        expression = load_expression(expression_path)
-            #        model.expressions[expression.name.split('.')[0]] = expression
-        # Folder not found or Live2D files not found
-        else:
+        if (not live2d_path.is_dir()) or (not (live2d_path / (file_name + '.model3.json')).is_file()):
             raise OSError(f'{live2d_path} is not a valid path')
+        # Create an empty model
+        model = Model(file_name)
+        motions_dir = live2d_path / 'Motions'
+        expressions_dir = live2d_path / 'Expressions'
+        # Read each motion and populate the model
+        for motion_entry in motions_dir.iterdir():
+            motion_path = motions_dir / motion_entry
+            if motion_path.is_file():
+                motion = Motion.load(motion_path)
+                model.motions[motion.name.split('.')[0]] = motion
+        # Read each expression and populate the model
+        for expression_entry in expressions_dir.iterdir():
+            expression_path = expressions_dir / expression_entry
+            if expression_path.is_file():
+                expression = Expression.load(expression_path)
+                model.expressions[expression.name.split('.')[0]] = expression
         return model
     
 #######################################################################################################################
