@@ -282,7 +282,7 @@ class Exclusive:
         # If last motion has ended
         if self.end < self.st:
             # If queue has items
-            if not self.empty():
+            if not self.is_empty():
                 self.skip()
             # If queue is empty and last motion was looping
             elif (self.buffer is not None) and (self.buffer['loop'] == True):
@@ -299,7 +299,7 @@ class Exclusive:
         return None
 
     def skip(self) -> dict[str, Any] | None:
-        if self.empty():
+        if self.is_empty():
             temp = None
             if self.buffer is not None:
                 temp = self.buffer.copy()
@@ -338,7 +338,7 @@ class Exclusive:
         return True
 
     def pop(self) -> dict[str, Any] | None:
-        if self.empty():
+        if self.is_empty():
             return None
         return self.queue.get()
 
@@ -350,7 +350,7 @@ class Exclusive:
         lst = list(self.queue.queue)
         return len(lst)
 
-    def empty(self) -> bool:
+    def is_empty(self) -> bool:
         return self.queue.empty()
 
 class Inclusive:
