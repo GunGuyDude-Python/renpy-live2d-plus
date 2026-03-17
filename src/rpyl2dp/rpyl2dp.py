@@ -299,19 +299,15 @@ class Exclusive:
         return None
 
     def skip(self) -> dict[str, Any] | None:
+        temp = None
+        if self.buffer is not None:
+            temp = self.buffer.copy()
         if self.is_empty():
-            temp = None
-            if self.buffer is not None:
-                temp = self.buffer.copy()
             self.buffer = None
             self.start = 0.0
             self.end = 0.0
             self.crop = 0.0
-            return temp
         else:
-            temp = None
-            if self.buffer is not None:
-                temp = self.buffer.copy()
             self.buffer = self.pop()
             # Condition already checked above, use assert to make Pylance happy
             assert(self.buffer is not None)
@@ -323,7 +319,14 @@ class Exclusive:
             self.start = self.st + wait_seconds
             self.end = self.start + motion.duration - crop_seconds
             self.crop = crop_seconds
-            return temp
+        return temp
+        
+    def clear(self) -> None:
+        while not self.is_empty():
+            self.skip()
+        if self.buffer is not None:
+            self.skip()
+        return
     
     def push(self, motion: Motion, wait_seconds: float, crop_seconds: float, loop: bool) -> bool:
         entry: dict[str, Any] = dict()
