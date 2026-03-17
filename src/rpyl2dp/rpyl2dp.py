@@ -334,11 +334,20 @@ class Exclusive:
         entry['wait_seconds'] = wait_seconds
         entry['crop_seconds'] = crop_seconds
         entry['loop'] = loop
+        return self.push_raw(entry)
+    
+    def push_raw(self, entry: dict[str, Any]) -> bool:
         try:
             self.queue.put(entry)
         except:
             return False
         return True
+    
+    def push_list(self, entries: list[dict[str, Any]]) -> list[bool]:
+        lst: list[bool] = list()
+        for entry in entries:
+            lst.append(self.push_raw(entry))
+        return lst
 
     def pop(self) -> dict[str, Any] | None:
         if self.is_empty():
