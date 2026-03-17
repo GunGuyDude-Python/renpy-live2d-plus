@@ -269,15 +269,67 @@ class Model:
     
 class Exclusive:
     def __init__(self) -> None:
+        self.st: float = 0.0
         self.queue: Queue[dict[str, Any]] = Queue()
         self.buffer: dict[str, Any] | None = None
+        self.start: float = 0.0
+        self.end: float = 0.0
+        self.crop: float = 0.0
         return
     
-    def push(self, motion: Motion, wait_seconds: float, skip_seconds: float, loop: bool) -> bool:
+    def tick(self, st: float) -> dict[tuple[str, str], float] | None:
+        self.st = st
+        # If last motion has ended
+        if self.end < self.st:
+            # If queue has items
+            if not self.empty():
+                self.skip()
+            # If queue is empty and last motion was looping
+            elif (self.buffer is not None) and (self.buffer['loop'] == True):
+                temp = self.skip()
+                assert(temp is not None)
+                self.queue.put(temp)
+            # Otherwise player is idle
+        # If motion is currently playing
+        elif (self.buffer is not None) and (self.start <= self.st):
+            relative_st: float = self.st - self.start + self.crop
+            motion: Motion = self.buffer['motion']
+            return motion.solve(relative_st)
+        # Otherwise player is idle
+        return None
+
+    def skip(self) -> dict[str, Any] | None:
+        if self.empty():
+            temp = None
+            if self.buffer is not None:
+                temp = self.buffer.copy()
+            self.buffer = None
+            self.start = 0.0
+            self.end = 0.0
+            self.crop = 0.0
+            return temp
+        else:
+            temp = None
+            if self.buffer is not None:
+                temp = self.buffer.copy()
+            self.buffer = self.pop()
+            # Condition already checked above, use assert to make Pylance happy
+            assert(self.buffer is not None)
+            motion: Motion = self.buffer['motion']
+            wait_seconds: float = self.buffer['wait_seconds']
+            crop_seconds: float = self.buffer['crop_seconds']
+            if crop_seconds > motion.duration:
+                crop_seconds = motion.duration
+            self.start = self.st + wait_seconds
+            self.end = self.start + motion.duration - crop_seconds
+            self.crop = crop_seconds
+            return temp
+    
+    def push(self, motion: Motion, wait_seconds: float, crop_seconds: float, loop: bool) -> bool:
         entry: dict[str, Any] = dict()
         entry['motion'] = motion
         entry['wait_seconds'] = wait_seconds
-        entry['skip_seconds'] = skip_seconds
+        entry['crop_seconds'] = crop_seconds
         entry['loop'] = loop
         try:
             self.queue.put(entry)
