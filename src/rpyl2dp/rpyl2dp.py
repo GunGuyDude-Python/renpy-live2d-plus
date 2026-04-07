@@ -343,7 +343,7 @@ class Exclusive:
             return False
         return True
     
-    def push_list(self, entries: list[dict[str, Any]]) -> list[bool]:
+    def push_many(self, entries: list[dict[str, Any]]) -> list[bool]:
         lst: list[bool] = list()
         for entry in entries:
             lst.append(self.push_raw(entry))
@@ -366,7 +366,75 @@ class Exclusive:
         return self.items.empty()
 
 class Inclusive:
-    pass
+    def __init__(self) -> None:
+        self.st: float = 0.0
+        self.items: dict[Motion, tuple[float, float, float, float]]
+        return
+    
+    def tick(self, st: float) -> dict[tuple[str, str], float]:
+        self.st = st
+        framedata: dict[tuple[str, str], float] = dict()
+        # Check each inclusive motion
+        for motion, (min_wait, max_wait, start, end) in self.items.items():
+            # If current loop has ended
+            if end < self.st:
+                self.generate_loop(motion)
+            # If motion is currently playing
+            elif start <= self.st:
+                relative_st: float = self.st - start
+                framedata.update(motion.solve(relative_st))
+        return framedata
+    
+    def add(self, motion: Motion, min_wait: float, max_wait: float) -> bool:
+        entry: tuple[float, float, float, float] = (min_wait, max_wait, 0.0, 0.0)
+        return self.add_raw(motion, entry)
+
+    def add_raw(self, motion: Motion, entry: tuple[float, float, float, float]) -> bool:
+        try:
+            self.items[motion] = entry
+        except:
+            return False
+        return True
+
+    def add_many(self, entries: dict[Motion, tuple[float, float, float, float]]) -> bool:
+        try:
+            self.items.update(entries)
+        except:
+            return False
+        return True
+    
+    def remove(self, motion: Motion) -> bool:
+        if self.is_empty():
+            return False
+        try:
+            self.items.pop(motion)
+        except:
+            return False
+        return True
+
+    def remove_many(self, motions: list[Motion]) -> list[bool]:
+        lst: list[bool] = list()
+        for motion in motions:
+            lst.append(self.remove(motion))
+        return lst
+
+    def generate_loop(self, motion: Motion) -> None:
+        duration: float = motion.duration
+        (min_wait, max_wait, _, _) = self.items[motion]
+        rand = min_wait + (max_wait - min_wait)*random.random()
+        start = self.st + rand
+        end = start + duration
+        self.items[motion] = (min_wait, max_wait, start, end)
+
+    def members(self) -> list:
+        lst = list(self.items.items())
+        return lst
+
+    def length(self) -> float:
+        return len(self.items)
+
+    def is_empty(self) -> bool:
+        return not self.items
 
 class ActiveExpr:
     pass
