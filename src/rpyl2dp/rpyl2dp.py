@@ -297,6 +297,32 @@ class Exclusive:
             return motion.solve(relative_st)
         # Otherwise player is idle
         return dict()
+    
+    def push(self, motion: Motion, wait_seconds: float, crop_seconds: float, loop: bool) -> bool:
+        entry: dict[str, Any] = dict()
+        entry['motion'] = motion
+        entry['wait_seconds'] = wait_seconds
+        entry['crop_seconds'] = crop_seconds
+        entry['loop'] = loop
+        return self.push_raw(entry)
+    
+    def push_raw(self, entry: dict[str, Any]) -> bool:
+        try:
+            self.items.put(entry)
+        except:
+            return False
+        return True
+    
+    def push_many(self, entries: list[dict[str, Any]]) -> list[bool]:
+        lst: list[bool] = list()
+        for entry in entries:
+            lst.append(self.push_raw(entry))
+        return lst
+
+    def pop(self) -> dict[str, Any]:
+        if self.is_empty():
+            return dict()
+        return self.items.get()
 
     def skip(self) -> dict[str, Any]:
         temp = dict()
@@ -327,32 +353,6 @@ class Exclusive:
         if not self.buffer:
             self.skip()
         return
-    
-    def push(self, motion: Motion, wait_seconds: float, crop_seconds: float, loop: bool) -> bool:
-        entry: dict[str, Any] = dict()
-        entry['motion'] = motion
-        entry['wait_seconds'] = wait_seconds
-        entry['crop_seconds'] = crop_seconds
-        entry['loop'] = loop
-        return self.push_raw(entry)
-    
-    def push_raw(self, entry: dict[str, Any]) -> bool:
-        try:
-            self.items.put(entry)
-        except:
-            return False
-        return True
-    
-    def push_many(self, entries: list[dict[str, Any]]) -> list[bool]:
-        lst: list[bool] = list()
-        for entry in entries:
-            lst.append(self.push_raw(entry))
-        return lst
-
-    def pop(self) -> dict[str, Any]:
-        if self.is_empty():
-            return dict()
-        return self.items.get()
 
     def members(self) -> list:
         lst = list(self.items.queue)
