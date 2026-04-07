@@ -130,6 +130,7 @@ class Curve:
             output += segment.__str__()
         return output
     
+    # Decentralised animation solver
     def solve(self, st: float) -> float:
         if st < 0:
             raise ValueError(f'Time of {st} cannot be smaller than 0')
@@ -164,6 +165,7 @@ class Motion:
             output += curve.__str__()
         return output
 
+    # Decentralised animation solver
     def solve(self, st: float) -> dict[tuple[str, str], float]:
         if st < 0:
             raise ValueError(f'Time of {st} cannot be smaller than 0')
@@ -241,6 +243,7 @@ class Model:
         #self.activeExpr: ActiveExpr = ActiveExpr()
         return
     
+    # Decentralised animation solver, mostly delegated to helper classes
     def tick(self, renpy_model, st: float) -> float:
         global FPS
         #self.persistent.update(self.activeExpr.tick(st))
@@ -254,6 +257,7 @@ class Model:
             output += motion.__str__()
         return output
     
+    # Read from folder and return instantiated model object
     @staticmethod
     def load(game_dir: str, file_name: str) -> Model:
         live2d_path = Path(game_dir) / 'live2d' / file_name
@@ -278,6 +282,7 @@ class Model:
                 model.expressions[expression.name.split('.')[0]] = expression
         return model
     
+# Class for managing exclusive motions of a model
 class Exclusive:
     def __init__(self, model: Model) -> None:
         self.model: Model = model
@@ -289,6 +294,7 @@ class Exclusive:
         self.crop: float = 0.0
         return
     
+    # Decentralised animation solver, calculates frame data
     def tick(self, st: float) -> dict[tuple[str, str], float]:
         self.st = st
         # If last motion has ended
@@ -310,6 +316,7 @@ class Exclusive:
         # Otherwise player is idle
         return dict()
     
+    # Enqueue an exclusive motion
     def push(self, motion: str | Motion, wait_seconds: float, crop_seconds: float, loop: bool) -> bool:
         entry: dict[str, Any] = dict()
         temp: Motion
@@ -339,11 +346,13 @@ class Exclusive:
             lst.append(self.push_raw(entry))
         return lst
 
+    # Dequeue an exclusive motion
     def pop(self) -> dict[str, Any]:
         if self.is_empty():
             return dict()
         return self.items.get()
 
+    # Cancel the current motion and start playing the next motion in queue
     def skip(self) -> dict[str, Any]:
         temp = dict()
         if not self.buffer:
@@ -366,7 +375,8 @@ class Exclusive:
             self.end = self.start + motion.duration - crop_seconds
             self.crop = crop_seconds
         return temp
-        
+    
+    # Skips all enqueued motions
     def clear(self) -> None:
         while not self.is_empty():
             self.skip()
@@ -374,17 +384,21 @@ class Exclusive:
             self.skip()
         return
 
+    # Returns currently enqueued exclusive motions
     def members(self) -> list:
         lst = list(self.items.queue)
         return lst
 
+    # Returns number of currently enqueued exclusive motions
     def length(self) -> float:
         lst = list(self.items.queue)
         return len(lst)
 
+    # Returns true if there are no currently enqueued exclusive motions
     def is_empty(self) -> bool:
         return self.items.empty()
 
+# Class for managing inclusive motions of a model
 class Inclusive:
     def __init__(self, model: Model) -> None:
         self.model: Model = model
@@ -392,6 +406,7 @@ class Inclusive:
         self.items: dict[Motion, tuple[float, float, float, float]]
         return
     
+    # Decentralised animation solver, calculates frame data
     def tick(self, st: float) -> dict[tuple[str, str], float]:
         self.st = st
         framedata: dict[tuple[str, str], float] = dict()
@@ -406,6 +421,7 @@ class Inclusive:
                 framedata.update(motion.solve(relative_st))
         return framedata
     
+    # Add an inclusive motion
     def add(self, motion: str | Motion, min_wait: float, max_wait: float) -> bool:
         entry: tuple[float, float, float, float] = (min_wait, max_wait, 0.0, 0.0)
         temp: Motion
@@ -432,6 +448,7 @@ class Inclusive:
             return False
         return True
     
+    # Remove an inclusive motion
     def remove(self, motion: str | Motion) -> bool:
         temp: Motion
         if self.is_empty():
@@ -455,6 +472,7 @@ class Inclusive:
             lst.append(self.remove(motion))
         return lst
 
+    # Randomise a new cycle of animation to be played
     def generate_loop(self, motion: Motion) -> None:
         duration: float = motion.duration
         (min_wait, max_wait, _, _) = self.items[motion]
@@ -463,28 +481,21 @@ class Inclusive:
         end = start + duration
         self.items[motion] = (min_wait, max_wait, start, end)
 
+    # Returns currently active inclusive motions
     def members(self) -> list:
         lst = list(self.items.items())
         return lst
 
+    # Returns number of currently active inclusive motions
     def length(self) -> float:
         return len(self.items)
 
+    # Returns true if there are no currently active inclusive motions
     def is_empty(self) -> bool:
         return not self.items
 
 class ActiveExpr:
     pass
-    
-#######################################################################################################################
-#                                                                                                                     #
-#                                                   USER FUNCTIONS                                                    #
-#                                                                                                                     #
-#######################################################################################################################
-    
-
-
-#######################################################################################################################
 
 # Set the default fade duration
 @staticmethod
