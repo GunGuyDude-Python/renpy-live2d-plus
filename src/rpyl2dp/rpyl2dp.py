@@ -236,8 +236,8 @@ class Model:
         self.motions: dict[str, Motion] = dict()
         self.expressions: dict[str, Expression] = dict()
         self.persistent: dict[tuple[str, str], float] = dict()
-        self.exclusive: Exclusive = Exclusive()
-        self.inclusive: Inclusive = Inclusive()
+        self.exclusive: Exclusive = Exclusive(self)
+        self.inclusive: Inclusive = Inclusive(self)
         #self.activeExpr: ActiveExpr = ActiveExpr()
         return
     
@@ -279,7 +279,8 @@ class Model:
         return model
     
 class Exclusive:
-    def __init__(self) -> None:
+    def __init__(self, model: Model) -> None:
+        self.model: Model = model
         self.st: float = 0.0
         self.items: Queue[dict[str, Any]] = Queue()
         self.buffer: dict[str, Any] = dict()
@@ -309,9 +310,17 @@ class Exclusive:
         # Otherwise player is idle
         return dict()
     
-    def push(self, motion: Motion, wait_seconds: float, crop_seconds: float, loop: bool) -> bool:
+    def push(self, motion: str | Motion, wait_seconds: float, crop_seconds: float, loop: bool) -> bool:
         entry: dict[str, Any] = dict()
-        entry['motion'] = motion
+        temp: Motion
+        if type(motion) is str:
+            temp = self.model.motions[motion]
+            if temp is None:
+                return False
+        else:
+            assert type(motion) is Motion
+            temp = motion
+        entry['motion'] = temp
         entry['wait_seconds'] = wait_seconds
         entry['crop_seconds'] = crop_seconds
         entry['loop'] = loop
@@ -377,7 +386,8 @@ class Exclusive:
         return self.items.empty()
 
 class Inclusive:
-    def __init__(self) -> None:
+    def __init__(self, model: Model) -> None:
+        self.model: Model = model
         self.st: float = 0.0
         self.items: dict[Motion, tuple[float, float, float, float]]
         return
@@ -396,9 +406,17 @@ class Inclusive:
                 framedata.update(motion.solve(relative_st))
         return framedata
     
-    def add(self, motion: Motion, min_wait: float, max_wait: float) -> bool:
+    def add(self, motion: str | Motion, min_wait: float, max_wait: float) -> bool:
         entry: tuple[float, float, float, float] = (min_wait, max_wait, 0.0, 0.0)
-        return self.add_raw(motion, entry)
+        temp: Motion
+        if type(motion) is str:
+            temp = self.model.motions[motion]
+            if temp is None:
+                return False
+        else:
+            assert type(motion) is Motion
+            temp = motion
+        return self.add_raw(temp, entry)
 
     def add_raw(self, motion: Motion, entry: tuple[float, float, float, float]) -> bool:
         try:
@@ -414,16 +432,24 @@ class Inclusive:
             return False
         return True
     
-    def remove(self, motion: Motion) -> bool:
+    def remove(self, motion: str | Motion) -> bool:
+        temp: Motion
         if self.is_empty():
             return False
+        elif type(motion) is str:
+            temp = self.model.motions[motion]
+            if temp is None:
+                return False
+        else:
+            assert type(motion) is Motion
+            temp = motion
         try:
-            self.items.pop(motion)
+            self.items.pop(temp)
         except:
             return False
         return True
 
-    def remove_many(self, motions: list[Motion]) -> list[bool]:
+    def remove_many(self, motions: list[str | Motion]) -> list[bool]:
         lst: list[bool] = list()
         for motion in motions:
             lst.append(self.remove(motion))
