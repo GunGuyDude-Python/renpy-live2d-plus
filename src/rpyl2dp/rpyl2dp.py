@@ -270,14 +270,14 @@ class Model:
 class Exclusive:
     def __init__(self) -> None:
         self.st: float = 0.0
-        self.queue: Queue[dict[str, Any]] = Queue()
-        self.buffer: dict[str, Any] | None = None
+        self.items: Queue[dict[str, Any]] = Queue()
+        self.buffer: dict[str, Any] = dict()
         self.start: float = 0.0
         self.end: float = 0.0
         self.crop: float = 0.0
         return
     
-    def tick(self, st: float) -> dict[tuple[str, str], float] | None:
+    def tick(self, st: float) -> dict[tuple[str, str], float]:
         self.st = st
         # If last motion has ended
         if self.end < self.st:
@@ -285,32 +285,32 @@ class Exclusive:
             if not self.is_empty():
                 self.skip()
             # If queue is empty and last motion was looping
-            elif (self.buffer is not None) and (self.buffer['loop'] == True):
+            elif (not self.buffer) and (self.buffer['loop'] == True):
                 temp = self.skip()
-                assert(temp is not None)
-                self.queue.put(temp)
+                assert(not temp)
+                self.items.put(temp)
             # Otherwise player is idle
         # If motion is currently playing
-        elif (self.buffer is not None) and (self.start <= self.st):
+        elif (not self.buffer) and (self.start <= self.st):
             relative_st: float = self.st - self.start + self.crop
             motion: Motion = self.buffer['motion']
             return motion.solve(relative_st)
         # Otherwise player is idle
-        return None
+        return dict()
 
-    def skip(self) -> dict[str, Any] | None:
-        temp = None
-        if self.buffer is not None:
+    def skip(self) -> dict[str, Any]:
+        temp = dict()
+        if not self.buffer:
             temp = self.buffer.copy()
         if self.is_empty():
-            self.buffer = None
+            self.buffer = dict()
             self.start = 0.0
             self.end = 0.0
             self.crop = 0.0
         else:
             self.buffer = self.pop()
             # Condition already checked above, use assert to make Pylance happy
-            assert(self.buffer is not None)
+            assert(not self.buffer)
             motion: Motion = self.buffer['motion']
             wait_seconds: float = self.buffer['wait_seconds']
             crop_seconds: float = self.buffer['crop_seconds']
@@ -324,7 +324,7 @@ class Exclusive:
     def clear(self) -> None:
         while not self.is_empty():
             self.skip()
-        if self.buffer is not None:
+        if not self.buffer:
             self.skip()
         return
     
@@ -338,7 +338,7 @@ class Exclusive:
     
     def push_raw(self, entry: dict[str, Any]) -> bool:
         try:
-            self.queue.put(entry)
+            self.items.put(entry)
         except:
             return False
         return True
@@ -349,21 +349,21 @@ class Exclusive:
             lst.append(self.push_raw(entry))
         return lst
 
-    def pop(self) -> dict[str, Any] | None:
+    def pop(self) -> dict[str, Any]:
         if self.is_empty():
-            return None
-        return self.queue.get()
+            return dict()
+        return self.items.get()
 
     def members(self) -> list:
-        lst = list(self.queue.queue)
+        lst = list(self.items.queue)
         return lst
 
     def length(self) -> float:
-        lst = list(self.queue.queue)
+        lst = list(self.items.queue)
         return len(lst)
 
     def is_empty(self) -> bool:
-        return self.queue.empty()
+        return self.items.empty()
 
 class Inclusive:
     pass
