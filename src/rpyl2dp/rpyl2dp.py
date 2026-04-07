@@ -235,7 +235,18 @@ class Model:
         self.name: str = name
         self.motions: dict[str, Motion] = dict()
         self.expressions: dict[str, Expression] = dict()
+        self.persistent: dict[tuple[str, str], float] = dict()
+        self.exclusive: Exclusive = Exclusive()
+        self.inclusive: Inclusive = Inclusive()
+        #self.activeExpr: ActiveExpr = ActiveExpr()
         return
+    
+    def tick(self, renpy_model, st: float) -> float:
+        global FPS
+        #self.persistent.update(self.activeExpr.tick(st))
+        self.persistent.update(self.inclusive.tick(st))
+        self.persistent.update(self.exclusive.tick(st))
+        return 1.0/FPS
     
     def __str__(self) -> str:
         output: str = f'Model name: {self.name}'
