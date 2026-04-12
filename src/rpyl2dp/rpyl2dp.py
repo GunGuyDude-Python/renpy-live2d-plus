@@ -199,6 +199,10 @@ class Param:
         output: str = f'ID: {self.id}\nValue: {self.value}\nBlend: {self.blend}\n'
         return output
     
+    # Decentralised animation solver
+    def solve(self) -> float:
+        return self.value
+    
     # Read raw list and return instantiated param objects in a dict
     @staticmethod
     def load(input: list[dict]) -> dict[str, Param]:
@@ -222,6 +226,14 @@ class Expression:
             output += param.__str__()
         return output
     
+    # Decentralised animation solver
+    def solve(self) -> dict[tuple[str, str], float]:
+        values: dict[tuple[str, str], float] = dict()
+        for id, param in self.params.items():
+            value: float = param.solve()
+            values[('Parameter', id)] = value
+        return values
+
     # Read from file and return instantiated expression object
     @staticmethod
     def load(file_path: Path) -> Expression:
@@ -495,7 +507,67 @@ class Inclusive:
         return not self.items
 
 class ActiveExpr:
-    pass
+    def __init__(self, model: Model) -> None:
+        self.model: Model = model
+        self.st: float = 0.0
+        self.items: set[Expression] = set()
+        self.fading: dict[Motion, tuple[float, float, bool]]
+        return
+    
+    def tick(self, st: float) -> dict[tuple[str, str], float]:
+        framedata: dict[tuple[str, str], float] = dict()
+        # Setup any active expressions first
+        for expr in self.items:
+            framedata.update(expr.solve())
+        # Animate fades second
+        for motion, (start, end, is_fade_out) in self.fading.items():
+            # If fade is over, add it as an active expression and remove it from the dict
+            if end < self.st:
+                self.fading.pop(motion)
+                if is_fade_out:
+                    #self.remove(motion.name)
+                    #wip=============================================================================
+                    pass
+                else:
+                    pass
+            # If fade is currently in effect
+            elif start <= self.st:
+                relative_st: float = self.st - start
+                framedata.update(motion.solve(relative_st))
+        return framedata
+    
+    def add(self, expr: str | Expression, fade_duration: float=default_fade_time) -> bool:
+        temp: Expression
+        if type(expr) is str:
+            temp = self.model.expressions[expr]
+            if temp is None:
+                return False
+        else:
+            assert type(expr) is Expression
+            temp = expr
+        # Check if expression is already active
+        is_fading: bool = temp.name in [motion.name for motion in self.fading.keys()]
+        if self.items.issuperset({temp}) or is_fading:
+            return False
+        # wip=======================================================================================
+        
+        return True
+    
+    #def remove(self, expr: str | Expression, fade_duration: float=default_fade_time) -> bool:
+    #    return True
+    
+    # Returns currently active expressions
+    def members(self) -> list:
+        lst = list(self.items)
+        return lst
+
+    # Returns number of currently active expressions
+    def length(self) -> float:
+        return len(self.items)
+
+    # Returns true if there are no currently active expressions
+    def is_empty(self) -> bool:
+        return not self.items
 
 # Set the default fade duration
 @staticmethod
