@@ -226,6 +226,26 @@ class Expression:
             output += param.__str__()
         return output
     
+    def param_ids(self) -> list[str]:
+        return list(self.params.keys())
+    
+    def to_motion(self, start_val: dict[str, float], duration: float=default_fade_time, is_fade_out: bool=False) -> Motion:
+        curves: dict[tuple[str, str], Curve] = dict()
+        op: float = 1.0
+        if is_fade_out:
+            op = -1.0
+        for name, param in self.params.items():
+            end_val = start_val[name] + (op * param.solve())
+            v0: tuple[float, float] = (0.0, start_val[name])
+            v1: tuple[float, float] = (duration/3.0, start_val[name])
+            v2: tuple[float, float] = (duration*2.0/3.0, end_val)
+            v3: tuple[float, float] = (duration, end_val)
+            new_seg = Segment(1, v0, v1, v2, v3)
+            new_curve = Curve('Parameter', param.id, [new_seg])
+            curves[('Parameter', param.id)] = new_curve
+        new_motion = Motion(self.name, duration, curves)
+        return new_motion
+
     # Decentralised animation solver
     def solve(self) -> dict[tuple[str, str], float]:
         values: dict[tuple[str, str], float] = dict()
@@ -247,6 +267,7 @@ class Expression:
 class Model:
     def __init__(self, name: str):
         self.name: str = name
+        self.renpy_model = None
         self.motions: dict[str, Motion] = dict()
         self.expressions: dict[str, Expression] = dict()
         self.persistent: dict[tuple[str, str], float] = dict()
@@ -258,6 +279,8 @@ class Model:
     # Decentralised animation solver, mostly delegated to helper classes
     def tick(self, renpy_model, st: float) -> float:
         global FPS
+        if self.renpy_model == None:
+            self.renpy_model = renpy_model
         #self.persistent.update(self.activeExpr.tick(st))
         self.persistent.update(self.inclusive.tick(st))
         self.persistent.update(self.exclusive.tick(st))
@@ -332,6 +355,7 @@ class Exclusive:
     def push(self, motion: str | Motion, wait_seconds: float, crop_seconds: float, loop: bool) -> bool:
         entry: dict[str, Any] = dict()
         temp: Motion
+        # Parse motion
         if type(motion) is str:
             temp = self.model.motions[motion]
             if temp is None:
@@ -437,6 +461,7 @@ class Inclusive:
     def add(self, motion: str | Motion, min_wait: float, max_wait: float) -> bool:
         entry: tuple[float, float, float, float] = (min_wait, max_wait, 0.0, 0.0)
         temp: Motion
+        # Parse motion
         if type(motion) is str:
             temp = self.model.motions[motion]
             if temp is None:
@@ -465,6 +490,7 @@ class Inclusive:
         temp: Motion
         if self.is_empty():
             return False
+        # Parse motion
         elif type(motion) is str:
             temp = self.model.motions[motion]
             if temp is None:
@@ -525,19 +551,18 @@ class ActiveExpr:
             if end < self.st:
                 self.fading.pop(motion)
                 if is_fade_out:
-                    #self.remove(motion.name)
-                    #wip=============================================================================
-                    pass
+                    self.items.remove(self.model.expressions[motion.name])
                 else:
-                    pass
+                    self.items.add(self.model.expressions[motion.name])
             # If fade is currently in effect
             elif start <= self.st:
                 relative_st: float = self.st - start
                 framedata.update(motion.solve(relative_st))
         return framedata
     
-    def add(self, expr: str | Expression, fade_duration: float=default_fade_time) -> bool:
+    def add_remove(self, expr: str | Expression, fade_duration: float=default_fade_time, is_fade_out: bool=False) -> bool:
         temp: Expression
+        # Parse expression
         if type(expr) is str:
             temp = self.model.expressions[expr]
             if temp is None:
@@ -547,14 +572,36 @@ class ActiveExpr:
             temp = expr
         # Check if expression is already active
         is_fading: bool = temp.name in [motion.name for motion in self.fading.keys()]
-        if self.items.issuperset({temp}) or is_fading:
+        if not is_fade_out and (is_fading or self.items.issuperset({temp})):
             return False
-        # wip=======================================================================================
-        
+        elif is_fade_out and not (is_fading or self.items.issuperset({temp})):
+            return False
+        # Skip animations if fade duration is zero
+        if fade_duration <= 0:
+            if is_fade_out:
+                self.items.remove(temp)
+            else:
+                self.items.add(temp)
+            return True
+        # Otherwise create an animation and use it
+        else:
+            ids = temp.param_ids()
+            start_val: dict[str, float] = dict()
+            for id in ids:
+                # If parameter not in persistent, add it from base model data
+                if ('Parameter', id) not in self.model.persistent:
+                    assert self.model.renpy_model is not None
+                    self.model.persistent[('Parameter', id)] = self.model.renpy_model.common.model.parameters[id].default
+                start_val[id] = self.model.persistent[('Parameter', id)]
+            new_motion = temp.to_motion(start_val, fade_duration, is_fade_out)
+            self.fading[new_motion] = (self.st, self.st + fade_duration, is_fade_out)
         return True
     
-    #def remove(self, expr: str | Expression, fade_duration: float=default_fade_time) -> bool:
-    #    return True
+    def add(self, expr: str | Expression, fade_duration: float=default_fade_time) -> bool:
+        return self.add_remove(expr, fade_duration, False)
+    
+    def remove(self, expr: str | Expression, fade_duration: float=default_fade_time) -> bool:
+        return self.add_remove(expr, fade_duration, True)
     
     # Returns currently active expressions
     def members(self) -> list:
