@@ -165,6 +165,23 @@ class Motion:
             output += curve.__str__()
         return output
 
+    def param_ids(self) -> list[tuple[str, str]]:
+        return list(self.curves.keys())
+
+    def make_transition(self, start_val: dict[tuple[str, str], float], duration: float=default_fade_time) -> Motion:
+        curves: dict[tuple[str, str], Curve] = dict()
+        for key, curve in self.curves.items():
+            end_val = curve.solve(duration)
+            v0: tuple[float, float] = (0.0, start_val[key])
+            v1: tuple[float, float] = (duration/3.0, start_val[key])
+            v2: tuple[float, float] = (duration*2.0/3.0, end_val)
+            v3: tuple[float, float] = (duration, end_val)
+            new_seg = Segment(1, v0, v1, v2, v3)
+            new_curve = Curve(curve.target, curve.id, [new_seg])
+            curves[(curve.target, curve.id)] = new_curve
+        new_motion = Motion(self.name + '_transition', duration, curves)
+        return new_motion
+
     # Decentralised animation solver
     def solve(self, st: float) -> dict[tuple[str, str], float]:
         if st < 0:
@@ -243,7 +260,7 @@ class Expression:
             new_seg = Segment(1, v0, v1, v2, v3)
             new_curve = Curve('Parameter', param.id, [new_seg])
             curves[('Parameter', param.id)] = new_curve
-        new_motion = Motion(self.name, duration, curves)
+        new_motion = Motion(self.name + '_fade', duration, curves)
         return new_motion
 
     # Decentralised animation solver
@@ -419,6 +436,32 @@ class Exclusive:
         if not self.buffer:
             self.skip()
         return
+    
+    # Immediately begin a transition to the given motion.
+    # Clears the queue.
+    def transition_to(self, motion: str | Motion, duration: float=default_transition_time, segment_type: int=1) -> bool:
+        temp: Motion
+        # Parse motion
+        if type(motion) is str:
+            temp = self.model.motions[motion]
+            if temp is None:
+                return False
+        else:
+            assert type(motion) is Motion
+            temp = motion
+        # Find out which parameters needs to transition
+        start_val: dict[tuple[str, str], float] = dict()
+        keys: list[tuple[str, str]] = temp.param_ids()
+        for key in keys:
+            if key in self.model.persistent:
+                start_val[key] = self.model.persistent[key]
+            else:
+                start_val[key] = 0.0
+        new_motion = temp.make_transition(start_val, duration)
+        self.clear()
+        self.push(new_motion, 0.0, 0.0, False)
+        self.push(temp, 0.0, duration, False)
+        return True
 
     # Returns currently enqueued exclusive motions
     def members(self) -> list:
