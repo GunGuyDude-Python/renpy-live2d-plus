@@ -489,7 +489,7 @@ class Inclusive:
     def __init__(self, model: Model) -> None:
         self.model: Model = model
         self.st: float = 0.0
-        self.items: dict[Motion, tuple[float, float, float, float]]
+        self.items: dict[Motion, tuple[float, float, float, float]] = dict()
         return
     
     # Decentralised animation solver, calculates frame data
@@ -587,7 +587,7 @@ class ActiveExpr:
         self.model: Model = model
         self.st: float = 0.0
         self.items: set[Expression] = set()
-        self.fading: dict[Motion, tuple[float, float, bool]]
+        self.fading: dict[Motion, tuple[float, float, bool]] = dict()
         return
     
     def tick(self, st: float) -> dict[tuple[str, str], float]:
