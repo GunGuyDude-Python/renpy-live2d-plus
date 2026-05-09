@@ -316,7 +316,7 @@ class Model:
     def reset(self) -> bool:
         self.activeExpr.clear()
         self.inclusive.clear()
-        self.expressions.clear()
+        self.exclusive.clear()
         self.persitent = dict()
         return True
     
@@ -324,6 +324,8 @@ class Model:
         output: str = f'Model name: {self.name}'
         for motion in self.motions.values():
             output += motion.__str__()
+        for expression in self.expressions.values():
+            output += expression.__str__()
         return output
     
     # Read from folder and return instantiated model object
