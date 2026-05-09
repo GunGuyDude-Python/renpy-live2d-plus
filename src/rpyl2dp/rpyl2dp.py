@@ -313,6 +313,13 @@ class Model:
                 renpy_model.blend_opacity(id, "Overwrite", value)
         return 1.0/FPS
     
+    def reset(self) -> bool:
+        self.activeExpr.clear()
+        self.inclusive.clear()
+        self.expressions.clear()
+        self.persitent = dict()
+        return True
+    
     def __str__(self) -> str:
         output: str = f'Model name: {self.name}'
         for motion in self.motions.values():
@@ -375,6 +382,32 @@ class Exclusive:
             return self.buffer['motion'].solve(relative_st)
         # Otherwise player is idle
         return dict()
+    
+    # Immediately begin a transition to the given motion.
+    # Clears the queue.
+    def transition_to(self, motion: str | Motion, duration: float=default_transition_time, segment_type: int=1) -> bool:
+        temp: Motion
+        # Parse motion
+        if type(motion) is str:
+            temp = self.model.motions[motion]
+            if temp is None:
+                return False
+        else:
+            assert type(motion) is Motion
+            temp = motion
+        # Find out which parameters needs to transition
+        start_val: dict[tuple[str, str], float] = dict()
+        keys: list[tuple[str, str]] = temp.param_ids()
+        for key in keys:
+            if key in self.model.persistent:
+                start_val[key] = self.model.persistent[key]
+            else:
+                start_val[key] = 0.0
+        new_motion = temp.make_transition(start_val, duration)
+        self.clear()
+        self.push(new_motion)
+        self.push(temp, crop_seconds=duration)
+        return True
     
     # Enqueue an exclusive motion
     def push(self, motion: str | Motion, wait_seconds: float=0.0, crop_seconds: float=0.0, loop: bool=False) -> bool:
@@ -439,35 +472,9 @@ class Exclusive:
         return temp
     
     # Skips all enqueued motions
-    def clear(self) -> None:
+    def clear(self) -> bool:
         self.items = Queue()
         self.buffer = dict()
-        return
-    
-    # Immediately begin a transition to the given motion.
-    # Clears the queue.
-    def transition_to(self, motion: str | Motion, duration: float=default_transition_time, segment_type: int=1) -> bool:
-        temp: Motion
-        # Parse motion
-        if type(motion) is str:
-            temp = self.model.motions[motion]
-            if temp is None:
-                return False
-        else:
-            assert type(motion) is Motion
-            temp = motion
-        # Find out which parameters needs to transition
-        start_val: dict[tuple[str, str], float] = dict()
-        keys: list[tuple[str, str]] = temp.param_ids()
-        for key in keys:
-            if key in self.model.persistent:
-                start_val[key] = self.model.persistent[key]
-            else:
-                start_val[key] = 0.0
-        new_motion = temp.make_transition(start_val, duration)
-        self.clear()
-        self.push(new_motion)
-        self.push(temp, crop_seconds=duration)
         return True
 
     # Returns currently enqueued exclusive motions
@@ -569,6 +576,10 @@ class Inclusive:
         end = start + duration
         self.items[motion] = (min_wait, max_wait, start, end)
 
+    def clear(self) -> bool:
+        self.items = dict()
+        return True
+
     # Returns currently active inclusive motions
     def members(self) -> list:
         lst = list(self.items.items())
@@ -652,6 +663,12 @@ class ActiveExpr:
     
     def remove(self, expr: str | Expression, fade_duration: float=default_fade_time) -> bool:
         return self.add_remove(expr, fade_duration, True)
+    
+    # Removes all active expressions
+    def clear(self) -> bool:
+        self.items = set()
+        self.fading = dict()
+        return True
     
     # Returns currently active expressions
     def members(self) -> list:
