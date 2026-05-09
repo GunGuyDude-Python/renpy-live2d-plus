@@ -301,6 +301,16 @@ class Model:
         #self.persistent.update(self.activeExpr.tick(st))
         self.persistent.update(self.inclusive.tick(st))
         self.persistent.update(self.exclusive.tick(st))
+        for (target, id), value in self.persistent.items():
+            if target == 'Model' and id == 'Opacity':
+                # WIP
+                pass
+            # Part parameter value
+            elif target == 'Parameter':
+                renpy_model.blend_parameter(id, "Overwrite", value)
+            # Part opacity
+            elif target == 'PartOpacity':
+                renpy_model.blend_opacity(id, "Overwrite", value)
         return 1.0/FPS
     
     def __str__(self) -> str:
