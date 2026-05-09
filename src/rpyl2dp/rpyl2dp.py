@@ -353,7 +353,6 @@ class Exclusive:
         self.buffer: dict[str, Any] = dict()
         self.start: float = 0.0
         self.end: float = 0.0
-        self.crop: float = 0.0
         return
     
     # Decentralised animation solver, calculates frame data
@@ -361,25 +360,24 @@ class Exclusive:
         self.st = st
         # If last motion has ended
         if self.end < self.st:
-            # If queue has items
+            # If queue has items, pop from queue and play motion
             if not self.is_empty():
                 self.skip()
-            # If queue is empty and last motion was looping
-            elif (not self.buffer) and (self.buffer['loop'] == True):
+            # If queue is empty and last motion was looping, requeue from buffer
+            elif (self.buffer) and (self.buffer['loop'] == True):
                 temp = self.skip()
-                assert(not temp)
+                assert(temp)
                 self.items.put(temp)
             # Otherwise player is idle
         # If motion is currently playing
-        elif (not self.buffer) and (self.start <= self.st):
-            relative_st: float = self.st - self.start + self.crop
-            motion: Motion = self.buffer['motion']
-            return motion.solve(relative_st)
+        elif (self.buffer) and (self.start <= self.st):
+            relative_st: float = self.st - self.start + self.buffer['crop_seconds']
+            return self.buffer['motion'].solve(relative_st)
         # Otherwise player is idle
         return dict()
     
     # Enqueue an exclusive motion
-    def push(self, motion: str | Motion, wait_seconds: float, crop_seconds: float, loop: bool) -> bool:
+    def push(self, motion: str | Motion, wait_seconds: float=0.0, crop_seconds: float=0.0, loop: bool=False) -> bool:
         entry: dict[str, Any] = dict()
         temp: Motion
         # Parse motion
@@ -418,17 +416,19 @@ class Exclusive:
     # Cancel the current motion and start playing the next motion in queue
     def skip(self) -> dict[str, Any]:
         temp = dict()
-        if not self.buffer:
+        # If currently playing something, make a copy for returning later
+        if self.buffer:
             temp = self.buffer.copy()
+        # If queue is empty, clear buffer
         if self.is_empty():
             self.buffer = dict()
             self.start = 0.0
             self.end = 0.0
-            self.crop = 0.0
+        # Else queue is not empty, pop from queue into buffer
         else:
             self.buffer = self.pop()
             # Condition already checked above, use assert to make Pylance happy
-            assert(not self.buffer)
+            assert(self.buffer)
             motion: Motion = self.buffer['motion']
             wait_seconds: float = self.buffer['wait_seconds']
             crop_seconds: float = self.buffer['crop_seconds']
@@ -436,15 +436,12 @@ class Exclusive:
                 crop_seconds = motion.duration
             self.start = self.st + wait_seconds
             self.end = self.start + motion.duration - crop_seconds
-            self.crop = crop_seconds
         return temp
     
     # Skips all enqueued motions
     def clear(self) -> None:
-        while not self.is_empty():
-            self.skip()
-        if not self.buffer:
-            self.skip()
+        self.items = Queue()
+        self.buffer = dict()
         return
     
     # Immediately begin a transition to the given motion.
@@ -469,8 +466,8 @@ class Exclusive:
                 start_val[key] = 0.0
         new_motion = temp.make_transition(start_val, duration)
         self.clear()
-        self.push(new_motion, 0.0, 0.0, False)
-        self.push(temp, 0.0, duration, False)
+        self.push(new_motion)
+        self.push(temp, crop_seconds=duration)
         return True
 
     # Returns currently enqueued exclusive motions
