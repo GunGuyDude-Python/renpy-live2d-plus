@@ -290,7 +290,7 @@ class Model:
         self.persistent: dict[tuple[str, str], float] = dict()
         self.exclusive: Exclusive = Exclusive(self)
         self.inclusive: Inclusive = Inclusive(self)
-        #self.activeExpr: ActiveExpr = ActiveExpr()
+        self.activeExpr: ActiveExpr = ActiveExpr(self)
         return
     
     # Decentralised animation solver, mostly delegated to helper classes
@@ -298,12 +298,12 @@ class Model:
         global FPS
         if self.renpy_model == None:
             self.renpy_model = renpy_model
-        #self.persistent.update(self.activeExpr.tick(st))
+        self.persistent.update(self.activeExpr.tick(st))
         self.persistent.update(self.inclusive.tick(st))
         self.persistent.update(self.exclusive.tick(st))
         for (target, id), value in self.persistent.items():
             if target == 'Model' and id == 'Opacity':
-                # WIP
+                # I have no clue how to make model transparent without making joints look weird
                 pass
             # Part parameter value
             elif target == 'Parameter':
