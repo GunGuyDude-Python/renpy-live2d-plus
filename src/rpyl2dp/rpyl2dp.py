@@ -645,17 +645,19 @@ class ActiveExpr:
         if fade_duration <= 0:
             if is_fade_out:
                 self.items.remove(temp)
+                for id in temp.param_ids():
+                    self.model.persistent[('Parameter', id)] = 0
             else:
                 self.items.add(temp)
             return True
         # Otherwise create an animation and use it
         else:
-            ids = temp.param_ids()
             start_val: dict[str, float] = dict()
-            for id in ids:
+            for id in temp.param_ids():
                 # If parameter not in persistent, add it from base model data
                 if ('Parameter', id) not in self.model.persistent:
-                    assert self.model.renpy_model is not None
+                    if self.model.renpy_model is None:
+                        return False
                     self.model.persistent[('Parameter', id)] = self.model.renpy_model.common.model.parameters[id].default
                 start_val[id] = self.model.persistent[('Parameter', id)]
             new_motion = temp.to_motion(start_val, fade_duration, is_fade_out)
