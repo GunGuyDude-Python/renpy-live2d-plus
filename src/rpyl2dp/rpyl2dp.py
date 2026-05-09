@@ -296,7 +296,7 @@ class Model:
     # Decentralised animation solver, mostly delegated to helper classes
     def tick(self, renpy_model, st: float) -> float:
         global FPS
-        if self.renpy_model == None:
+        if self.renpy_model is None:
             self.renpy_model = renpy_model
         self.persistent.update(self.activeExpr.tick(st))
         self.persistent.update(self.inclusive.tick(st))
@@ -606,7 +606,9 @@ class ActiveExpr:
         return
     
     def tick(self, st: float) -> dict[tuple[str, str], float]:
+        self.st = st
         framedata: dict[tuple[str, str], float] = dict()
+        temp: list[Motion] = list()
         # Setup any active expressions first
         for expr in self.items:
             framedata.update(expr.solve())
@@ -614,15 +616,20 @@ class ActiveExpr:
         for motion, (start, end, is_fade_out) in self.fading.items():
             # If fade is over, add it as an active expression and remove it from the dict
             if end < self.st:
-                self.fading.pop(motion)
+                temp.append(motion)
                 if is_fade_out:
-                    self.items.remove(self.model.expressions[motion.name])
+                    self.items.remove(self.model.expressions[motion.name.removesuffix("_fade")])
+                    for id in self.model.expressions[motion.name.removesuffix("_fade")].param_ids():
+                        self.model.persistent[('Parameter', id)] = 0
                 else:
-                    self.items.add(self.model.expressions[motion.name])
+                    self.items.add(self.model.expressions[motion.name.removesuffix("_fade")])
             # If fade is currently in effect
             elif start <= self.st:
                 relative_st: float = self.st - start
+                print(relative_st)
                 framedata.update(motion.solve(relative_st))
+        for motion in temp:
+            self.fading.pop(motion)
         return framedata
     
     def add_remove(self, expr: str | Expression, fade_duration: float=default_fade_time, is_fade_out: bool=False) -> bool:
