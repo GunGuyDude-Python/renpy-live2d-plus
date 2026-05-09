@@ -475,6 +475,8 @@ class Exclusive:
     def clear(self) -> bool:
         self.items = Queue()
         self.buffer = dict()
+        self.start = 0.0
+        self.end = 0.0
         return True
 
     # Returns currently enqueued exclusive motions
