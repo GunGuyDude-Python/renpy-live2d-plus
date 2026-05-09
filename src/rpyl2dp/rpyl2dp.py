@@ -176,7 +176,7 @@ class Motion:
             v1: tuple[float, float] = (duration/3.0, start_val[key])
             v2: tuple[float, float] = (duration*2.0/3.0, end_val)
             v3: tuple[float, float] = (duration, end_val)
-            new_seg = Segment(1, v0, v1, v2, v3)
+            new_seg = Segment(1, v0, v1=v1, v2=v2, v3=v3)
             new_curve = Curve(curve.target, curve.id, [new_seg])
             curves[(curve.target, curve.id)] = new_curve
         new_motion = Motion(self.name + '_transition', duration, curves)
@@ -257,7 +257,7 @@ class Expression:
             v1: tuple[float, float] = (duration/3.0, start_val[name])
             v2: tuple[float, float] = (duration*2.0/3.0, end_val)
             v3: tuple[float, float] = (duration, end_val)
-            new_seg = Segment(1, v0, v1, v2, v3)
+            new_seg = Segment(1, v0, v1=v1, v2=v2, v3=v3)
             new_curve = Curve('Parameter', param.id, [new_seg])
             curves[('Parameter', param.id)] = new_curve
         new_motion = Motion(self.name + '_fade', duration, curves)
