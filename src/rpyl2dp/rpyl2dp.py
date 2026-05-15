@@ -251,10 +251,10 @@ class Expression:
         op: float = 1.0
         if is_fade_out:
             op = -1.0
-        for name, param in self.params.items():
-            end_val = start_val[name] + (op * param.solve())
-            v0: tuple[float, float] = (0.0, start_val[name])
-            v1: tuple[float, float] = (duration/3.0, start_val[name])
+        for id, param in self.params.items():
+            end_val: float = start_val.get(id, 0) + (op * param.solve())
+            v0: tuple[float, float] = (0.0, start_val.get(id, 0))
+            v1: tuple[float, float] = (duration/3.0, start_val.get(id, 0))
             v2: tuple[float, float] = (duration*2.0/3.0, end_val)
             v3: tuple[float, float] = (duration, end_val)
             new_seg = Segment(1, v0, v1=v1, v2=v2, v3=v3)
@@ -268,6 +268,16 @@ class Expression:
         values: dict[tuple[str, str], float] = dict()
         for id, param in self.params.items():
             value: float = param.solve()
+            values[('Parameter', id)] = value
+        return values
+    
+    def solve_advanced(self, start_val: dict[str, float], is_fade_out: bool=False) -> dict[tuple[str, str], float]:
+        values: dict[tuple[str, str], float] = dict()
+        op: float = 1.0
+        if is_fade_out:
+            op = -1.0
+        for id, param in self.params.items():
+            value: float = start_val.get(id, 0) + (op * param.solve())
             values[('Parameter', id)] = value
         return values
 
@@ -317,7 +327,7 @@ class Model:
         self.activeExpr.clear()
         self.inclusive.clear()
         self.exclusive.clear()
-        self.persitent = dict()
+        self.persistent = dict()
         return True
     
     def __str__(self) -> str:
@@ -611,22 +621,31 @@ class ActiveExpr:
         temp: list[Motion] = list()
         # Setup any active expressions first
         for expr in self.items:
-            framedata.update(expr.solve())
+            start_val: dict[str, float]
+            if self.model.renpy_model is not None:
+                start_val = {k:framedata.get(('Parameter', k), float(self.model.renpy_model.common.model.parameters[k].default)) for k in expr.param_ids()}
+            else:
+                start_val = {k:framedata.get(('Parameter', k), 0) for k in expr.param_ids()}
+            framedata.update(expr.solve_advanced(start_val))
         # Animate fades second
         for motion, (start, end, is_fade_out) in self.fading.items():
             # If fade is over, add it as an active expression and remove it from the dict
             if end < self.st:
                 temp.append(motion)
+                expr: Expression = self.model.expressions[motion.name.removesuffix("_fade")]
                 if is_fade_out:
-                    self.items.remove(self.model.expressions[motion.name.removesuffix("_fade")])
-                    for id in self.model.expressions[motion.name.removesuffix("_fade")].param_ids():
-                        self.model.persistent[('Parameter', id)] = 0
+                    self.items.remove(expr)
+                    start_val: dict[str, float]
+                    if self.model.renpy_model is not None:
+                        start_val = {k:framedata.get(('Parameter', k), float(self.model.renpy_model.common.model.parameters[k].default)) for k in expr.param_ids()}
+                    else:
+                        start_val = {k:framedata.get(('Parameter', k), 0) for k in expr.param_ids()}
+                    framedata.update(expr.solve_advanced(start_val, is_fade_out=True))
                 else:
-                    self.items.add(self.model.expressions[motion.name.removesuffix("_fade")])
+                    self.items.add(expr)
             # If fade is currently in effect
             elif start <= self.st:
                 relative_st: float = self.st - start
-                print(relative_st)
                 framedata.update(motion.solve(relative_st))
         for motion in temp:
             self.fading.pop(motion)
@@ -652,8 +671,22 @@ class ActiveExpr:
         if fade_duration <= 0:
             if is_fade_out:
                 self.items.remove(temp)
-                for id in temp.param_ids():
-                    self.model.persistent[('Parameter', id)] = 0
+                # Do this stupid calc for all expressions to find out what the end value is
+                # Like why are expressions calculated as addition instead of overwrite which mf made this
+                framedata: dict[tuple[str, str], float] = dict()
+                for expr in self.items:
+                    start_val: dict[str, float]
+                    if self.model.renpy_model is not None:
+                        start_val = {k:framedata.get(('Parameter', k), float(self.model.renpy_model.common.model.parameters[k].default)) for k in expr.param_ids()}
+                    else:
+                        start_val = {k:framedata.get(('Parameter', k), 0) for k in expr.param_ids()}
+                    framedata.update(expr.solve_advanced(start_val))
+                start_val: dict[str, float]
+                if self.model.renpy_model is not None:
+                    start_val = {k:framedata.get(('Parameter', k), float(self.model.renpy_model.common.model.parameters[k].default)) for k in temp.param_ids()}
+                else:
+                    start_val = {k:framedata.get(('Parameter', k), 0) for k in temp.param_ids()}
+                self.model.persistent.update(temp.solve_advanced(start_val, is_fade_out=True))
             else:
                 self.items.add(temp)
             return True
@@ -666,7 +699,7 @@ class ActiveExpr:
                     if self.model.renpy_model is None:
                         return False
                     self.model.persistent[('Parameter', id)] = self.model.renpy_model.common.model.parameters[id].default
-                start_val[id] = self.model.persistent[('Parameter', id)]
+                start_val[id] = self.model.persistent.get(('Parameter', id), 0)
             new_motion = temp.to_motion(start_val, fade_duration, is_fade_out)
             self.fading[new_motion] = (self.st, self.st + fade_duration, is_fade_out)
         return True
