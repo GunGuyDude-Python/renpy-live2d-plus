@@ -1,6 +1,8 @@
+from __future__ import annotations
 from pathlib import Path
 import json
-import queue
+from queue import Queue
+from typing import Any
 import random
 
 FPS = 30.0
@@ -9,283 +11,309 @@ default_transition_time = 1.0
 
 #######################################################################################################################
 
-# Class for motions
-class Motion():
-    def __init__(self, name: str, duration: float, curves: list):
-        if not isinstance(name, str):
-            raise TypeError('Name must be a string')
-        elif not (isinstance(duration, float) or isinstance(duration, int)):
-            raise TypeError('Duration must be an float')
-        elif not isinstance(curves, list):
-            raise TypeError('Curves must be a list')
-        else:
-            self.name: str = name
-            self.duration: float = float(duration)
-            self.curves: list = curves
-            return
-    
-    def __str__(self):
-        return f'Name: {self.name}\nDuration: {self.duration}\nCurves: {self.curves}'
-
-# Class for expressions
-class Expression():
-    def __init__(self, name: str, parameters: list):
-        if not isinstance(name, str):
-            raise TypeError('Name must be a string')
-        elif not isinstance(parameters, list):
-            raise TypeError('Parameters must be a list')
-        else:
-            self.name: str = name
-            self.parameters: list = parameters
-            return
-        
-    def __str__(self):
-        return f'Name: {self.name}\nParameters: {self.parameters}'
-    
-# Exclusive animations use a FIFO queue. Exclusive animations can only play one at a time.
-class Exclusive:
-    def __init__(self):
-        self.exclusive_queue: queue.Queue = queue.Queue()
+# Class for motion segments.
+# For type, 0 = linear, 1 = bezier, 2 = stepped, 3 = inverse stepped
+# For each vertex, v[0] is time, v[1] is value
+# v1 & v2 are only used for bezier type
+class Segment:
+    def __init__(self, type: int, 
+                 v0: tuple[float, float], 
+                 v3: tuple[float, float], 
+                 v1: tuple[float, float] = (0.0, 0.0),
+                 v2: tuple[float, float] = (0.0, 0.0)
+                 ) -> None:
+        self.type: int = type
+        self.v0: tuple[float, float] = v0
+        self.v1: tuple[float, float] = v1
+        self.v2: tuple[float, float] = v2
+        self.v3: tuple[float, float] = v3
         return
 
-    def push(self, motion_name: str, wait_seconds: float, skip_seconds: float, loop: bool) -> None:
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
-        elif not (isinstance(wait_seconds, float) or isinstance(wait_seconds, int)):
-            raise TypeError('Wait seconds must be a float')
-        elif not (isinstance(skip_seconds, float) or isinstance(skip_seconds, int)):
-            raise TypeError('Skip seconds must be a float')
-        elif not isinstance(loop, bool):
-            raise TypeError('Loop must be a bool')
-        else:
-            self.exclusive_queue.put((motion_name, float(wait_seconds), float(skip_seconds), loop))
-            return
+    def __str__(self) -> str:
+        output: str = f'Type: {self.type}\n'
+        output += f'Starting vertex: t={self.v0[0]}, val={self.v0[1]}\n'
+        if self.type == 1:
+            output += f'Bezier vertex 1: t={self.v1[0]}, val={self.v1[1]}\n'
+            output += f'Bezier vertex 2: t={self.v2[0]}, val={self.v2[1]}\n'
+        output += f'Stopping vertex: t={self.v3[0]}, val={self.v3[1]}\n'
+        return output
     
-    def pop(self) -> tuple[str, float, float, bool] | None:
-        if self.exclusive_queue.empty():
-            return None
-        else:
-            (motion_name, wait_seconds, skip_seconds, loop) = self.exclusive_queue.get()
-            return (motion_name, wait_seconds, skip_seconds, loop)
+    # Check if time is within bounds
+    def contains(self, st: float) -> bool:
+        return (self.v0[0] <= st < self.v3[0])
 
-# Inclusive animations use a dict. All inclusive animations in the dict can play simultaneously.
-class Inclusive:
-    def __init__(self):
-        self.inclusive_dict: dict = dict()
+    # Convert time to parameter value
+    def solve(self, st: float) -> float:
+        # Raise exception if time is not within bounds
+        if (st < self.v0[0]) or (self.v3[0] < st):
+            raise ValueError(f'{st} is beyond segment bounds of ({self.v0[0]}, {self.v3[0]})')
+        # Linear
+        if self.type == 0:
+            return self.linear(st, self.v0, self.v3)
+        # Bezier
+        elif self.type == 1:
+            return self.bezier(st, self.v0, self.v1, self.v2, self.v3)
+        # Stepped
+        elif self.type == 2:
+            return self.stepped(st, self.v0, self.v3)
+        # Inverse stepped
+        elif self.type == 3:
+            return self.inv_stepped(st, self.v0, self.v3)
+        # Exception
+        else:
+            raise ValueError(f'{self.type} is not a valid value for segment type.')
+    
+    # Read raw list and return instantiated segment objects in a list
+    @staticmethod
+    def load(input: list[float]) -> list[Segment]:
+        segments: list[Segment] = list()
+        ptr: int = 0
+        while (ptr+2 < len(input)):
+            # Uncast the type variable, very cursed
+            type: int = int(input[ptr+2])
+            v0: tuple[float, float] = (input[ptr], input[ptr+1])
+            # Bezier type
+            if type == 1:
+                v1: tuple[float, float] = (input[ptr+3], input[ptr+4])
+                v2: tuple[float, float] = (input[ptr+5], input[ptr+6])
+                v3: tuple[float, float] = (input[ptr+7], input[ptr+8])
+                segments.append(Segment(type, v0, v1=v1, v2=v2, v3=v3))
+                ptr += 7
+            # Linear or stepped type
+            else:
+                v3: tuple[float, float] = (input[ptr+3], input[ptr+4])
+                segments.append(Segment(type, v0, v3))
+                ptr += 3
+        return segments
+    
+    # Solve for y given st (x) in a linear equation
+    @staticmethod
+    def linear(st: float, p0: tuple[float, float], p1: tuple[float, float]) -> float:
+        # Normalise st to t
+        t = (st-p0[0]) / (p1[0]-p0[0])
+        y = t*(p1[1]-p0[1]) + p0[1]
+        return y
+
+    # Solve for y given st (x) in a cubic bezier
+    @staticmethod
+    def bezier(st: float, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float]) -> float:
+        # Normalise st to t
+        t = (st-p0[0]) / (p3[0]-p0[0])
+        y = (1-t)**3 * p0[1] + 3*t*(1-t)**2 * p1[1] + 3*(1-t)*t**2 * p2[1] + t**3 * p3[1]
+        return y
+
+    # Solve for y given st (x) in a stepped function
+    @staticmethod
+    def stepped(st: float, p0: tuple[float, float], p1: tuple[float, float]) -> float:
+        # Stepped always returns value at first vertex
+        y = p0[1]
+        return y
+
+    # Solve for y given st (x) in a inverse stepped function
+    @staticmethod
+    def inv_stepped(st: float, p0: tuple[float, float], p1: tuple[float, float]) -> float:
+        # Inverse stepped always returns value at second vertex
+        y = p1[1]
+        return y
+
+# Class for motion curves.
+class Curve:
+    def __init__(self, target: str, id: str, segments: list[Segment]) -> None:
+        self.target: str = target
+        self.id: str = id
+        self.segments: list[Segment] = segments
         return
 
-    def add(self, motion_name: str, min_seconds: float, max_seconds: float) -> None:
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
-        elif not (isinstance(min_seconds, float) or isinstance(min_seconds, int)):
-            raise TypeError('Minimum seconds must be a float')
-        elif not (isinstance(max_seconds, float) or isinstance(max_seconds, int)):
-            raise TypeError('Maximum seconds must be a float')
-        else:
-            self.inclusive_dict[motion_name] = (float(min_seconds), float(max_seconds), 0.0, 0.0)
-            return
-
-    def remove(self, motion_name: str) -> None:
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
-        elif motion_name not in self.inclusive_dict:
-            return
-        else:
-            self.inclusive_dict.pop(motion_name)
-            return
-
-# Active expressions use a dict. All active expressions are shown simultaneously.
-class ActiveExpressions:
-    def __init__(self):
-        self.expressions_dict: dict = dict()
-        self.next: tuple[str, float, bool] | None = None
-        return
+    def __str__(self) -> str:
+        output: str = f'\nTarget: {self.target}\nID: {self.id}\n'
+        for segment in self.segments:
+            output += segment.__str__()
+        return output
     
-    def add(self, expression_name: str, fade_in_time: float) -> None:
-        if not isinstance(expression_name, str):
-            raise TypeError('Expression name must be a string')
-        elif not (isinstance(fade_in_time, float) or isinstance(fade_in_time, int)):
-            raise TypeError('Fade in time must be a float')
-        else:
-            #self.expressions_dict[expression_name] = float(fade_in_time)
-            self.next = (expression_name, float(fade_in_time), False)
-            return
+    # Decentralised animation solver
+    def solve(self, st: float) -> float:
+        if st < 0:
+            raise ValueError(f'Time of {st} cannot be smaller than 0')
+        for segment in self.segments:
+            if segment.contains(st):
+                return segment.solve(st)
+        # Pad remaining runtime with last valid value
+        return self.segments[-1].v3[1]
 
-    def remove(self, expression_name: str, fade_out_time) -> None:
-        if not isinstance(expression_name, str):
-            raise TypeError('Expression name must be a string')
-        elif not (isinstance(fade_out_time, float) or isinstance(fade_out_time, int)):
-            raise TypeError('Fade out time must be a float')
-        elif expression_name not in self.expressions_dict:
-            return
-        else:
-            #self.expressions_dict.pop(expression_name)
-            self.next = (expression_name, float(fade_out_time), True)
-            return
+    # Read raw list and return instantiated curve objects in a dict
+    @staticmethod
+    def load(input: list[dict]) -> dict[tuple[str, str], Curve]:
+        curves: dict[tuple[str, str], Curve] = dict()
+        for curve in input:
+            target: str = str(curve['Target'])
+            id: str = str(curve['Id'])
+            segments: list[Segment] = Segment.load(curve['Segments'])
+            curves[(target, id)] = Curve(target, id, segments)
+        return curves
 
-#######################################################################################################################
-
-class Model:
-    def __init__(self, name: str):
-        if not isinstance(name, str):
-            raise TypeError('Model name must be a string')
+# Class for model motions
+class Motion:
+    def __init__(self, name: str, duration: float, curves: dict[tuple[str, str], Curve]) -> None:
         self.name: str = name
-        self.motions: dict = dict()
-        self.expressions: dict = dict()
-        self.exclusive: Exclusive = Exclusive()
-        self.inclusive: Inclusive = Inclusive()
-        self.active_expressions: ActiveExpressions = ActiveExpressions()
-        self.action: Motion | None = None
-        self.action_start_time: float = 0.0
-        self.action_end_time: float = 0.0
-        self.action_skip_time: float = 0.0
-        self.action_loop: bool = False
-        self.persistent: dict = dict()
-        self.fading: str | None = None
-        self.fading_start_time: float = 0.0
-        self.fading_end_time: float = 0.0
-        self.persistent_exp: dict = dict()
-        self.st: float = 0.0
-        self.sequential_name = 0
+        self.duration: float = duration
+        self.curves: dict[tuple[str, str], Curve] = curves
         return
     
-    def __str__(self):
-        out: str = str()
-        out += f'Model name: {self.name}\n'
-        for motion in self.motions:
-            out += f'Motion name: {motion}\n'
-        for expression in self.expressions:
-            out += f'Expression name: {expression}\n'
-        return out
-    
-#######################################################################################################################
-#                                                                                                                     #
-#                                                   USER FUNCTIONS                                                    #
-#                                                                                                                     #
-#######################################################################################################################
-    
-    # Returns a dict of motions currently playing or queued
-    def list_active(self) -> dict[str, list[str]]:
-        values: dict = dict()
-        exclusives: list[str] = list()
-        inclusives: list[str] = list()
-        expressions: list[str] = list()
-        if self.action is not None:
-            exclusives.append(self.action.name)
-        for (motion_name, wait_seconds, loop) in list(self.exclusive.exclusive_queue.queue):
-            exclusives.append(motion_name)
-        for (k, v) in self.inclusive.inclusive_dict.items():
-            inclusives.append(k)
-        for (k, v) in self.active_expressions.expressions_dict.items():
-            expressions.append(k)
-        values['Exclusive motions'] = exclusives
-        values['Inclusive motions'] = inclusives
-        values['Expressions'] = expressions
+    def __str__(self) -> str:
+        output: str = f'\n\n\nMotion name: {self.name}\nDuration: {self.duration}\n'
+        for curve in self.curves.values():
+            output += curve.__str__()
+        return output
+
+    def param_ids(self) -> list[tuple[str, str]]:
+        return list(self.curves.keys())
+
+    def make_transition(self, start_val: dict[tuple[str, str], float], duration: float=default_fade_time) -> Motion:
+        curves: dict[tuple[str, str], Curve] = dict()
+        for key, curve in self.curves.items():
+            end_val = curve.solve(duration)
+            v0: tuple[float, float] = (0.0, start_val[key])
+            v1: tuple[float, float] = (duration/3.0, start_val[key])
+            v2: tuple[float, float] = (duration*2.0/3.0, end_val)
+            v3: tuple[float, float] = (duration, end_val)
+            new_seg = Segment(1, v0, v1=v1, v2=v2, v3=v3)
+            new_curve = Curve(curve.target, curve.id, [new_seg])
+            curves[(curve.target, curve.id)] = new_curve
+        new_motion = Motion(self.name + '_transition', duration, curves)
+        return new_motion
+
+    # Decentralised animation solver
+    def solve(self, st: float) -> dict[tuple[str, str], float]:
+        if st < 0:
+            raise ValueError(f'Time of {st} cannot be smaller than 0')
+        if st > self.duration:
+            raise ValueError(f'Time of {st} cannot be longer than motion duration')
+        values: dict[tuple[str, str], float] = dict()
+        for key, curve in self.curves.items():
+            value: float = curve.solve(st)
+            values[key] = value
         return values
 
-    # Push a motion to the exclusive queue
-    def exclusive_push(self, motion_name: str, wait_seconds: float=0, skip_seconds: float=0, loop: bool=True) -> None:
-        self.exclusive.push(motion_name, wait_seconds, skip_seconds, loop)
-        return
-    
-    # Pop a motion from the exclusive queue
-    def exclusive_pop(self) -> tuple[str, float, float, bool] | None:
-        return self.exclusive.pop()
-    
-    # Returns True if exclusive queue is empty
-    def exclusive_empty(self) -> bool:
-        return self.exclusive.exclusive_queue.empty()
+    # Read from file and return instantiated motion object
+    @staticmethod
+    def load(file_path: Path) -> Motion:
+        with open(file_path, 'r') as file:
+            data = json.load(file, parse_int=float)
+            curves = Curve.load(data['Curves'])
+            motion = Motion(file_path.name.split('.')[0], data['Meta']['Duration'], curves)
+        return motion
 
-    # Skip playing the current motion
-    def exclusive_skip(self) -> None:
-        if self.exclusive_empty():
-            self.action = None
-            self.action_start_time = 0.0
-            self.action_end_time = 0.0
-            self.action_skip_time = 0.0
-            self.action_loop = False
-            return
-        else:
-            popped = self.exclusive_pop()
-            assert popped is not None
-            (motion_name, wait_seconds, skip_seconds, loop) = popped
-            self.action = self.motions[motion_name]
-            # Failsafe
-            if skip_seconds > self.action.duration:     # type: ignore
-                skip_seconds = self.action.duration     # type: ignore
-            self.action_start_time = self.st + wait_seconds
-            self.action_end_time = self.action_start_time + self.action.duration - skip_seconds     # type: ignore
-            self.action_skip_time = skip_seconds
-            self.action_loop = loop
-            return
-        
-    # Skip all motions in the queue
-    def exclusive_skipall(self) -> None:
-        while(not self.exclusive_empty()):
-            self.exclusive_skip()
-        self.exclusive_skip()
-    
-    # Add a motion to the inclusive set
-    def inclusive_add(self, motion_name: str, min_seconds: float=0, max_seconds: float=0) -> None:
-        self.inclusive.add(motion_name, min_seconds, max_seconds)
+class Param:
+    def __init__(self, id: str, value: float, blend: str='') -> None:
+        self.id: str = id
+        self.value: float = value
+        self.blend: str = 'Add'
+        if blend in ['Add', 'Overwrite']:
+            self.blend = blend
         return
     
-    # Remove a motion from the inclusive set
-    def inclusive_remove(self, motion_name: str) -> None:
-        self.inclusive.remove(motion_name)
-        return
+    def __str__(self) -> str:
+        output: str = f'ID: {self.id}\nValue: {self.value}\nBlend: {self.blend}\n'
+        return output
     
-    # Remove all motions from the inclusive set
-    def inclusive_removeall(self) -> None:
-        self.inclusive.inclusive_dict.clear()
+    # Decentralised animation solver
+    def solve(self) -> float:
+        return self.value
     
-    # Activate an expression
-    def expression_add(self, expression_name: str, fade_in_time: float=default_fade_time) -> None:
-        self.active_expressions.add(expression_name, fade_in_time)
-        return
-    
-    # Deactivate an expression
-    def expression_remove(self, expression_name: str, fade_out_time: float=default_fade_time) -> None:
-        self.active_expressions.remove(expression_name, fade_out_time)
-        return
-    
-    # Deactivate all expressions
-    def expression_removeall(self) -> None:
-        self.active_expressions.expressions_dict.clear()
-    
-    # Reset the model and its variables
-    def reset(self) -> None:
-        self.exclusive_skipall()
-        self.inclusive_removeall()
-        self.expression_removeall()
-        self.persistent.clear()
-        self.persistent_exp.clear()
-        self.action = None
-        self.action_start_time = 0.0
-        self.action_end_time = 0.0
-        self.action_skip_time = 0.0
-        self.action_loop = False
-        self.fading = None
-        self.fading_start_time = 0.0
-        self.fading_end_time = 0.0
+    # Read raw list and return instantiated param objects in a dict
+    @staticmethod
+    def load(input: list[dict]) -> dict[str, Param]:
+        params: dict[str, Param] = dict()
+        for param in input:
+            id: str = str(param['Id'])
+            value: float = float(param['Value'])
+            blend: str = str(param['Blend'])
+            params[id] = Param(id, value, blend)
+        return params
 
-    # Call every frame to animate
-    def update(self, renpy_model, st: float) -> float:
+class Expression:
+    def __init__(self, name: str, params: dict[str, Param]) -> None:
+        self.name: str = name
+        self.params: dict[str, Param] = params
+        return
+    
+    def __str__(self) -> str:
+        output: str = f'\n\n\nExpression name: {self.name}\n'
+        for param in self.params.values():
+            output += param.__str__()
+        return output
+    
+    def param_ids(self) -> list[str]:
+        return list(self.params.keys())
+    
+    def to_motion(self, start_val: dict[str, float], duration: float=default_fade_time, is_fade_out: bool=False) -> Motion:
+        curves: dict[tuple[str, str], Curve] = dict()
+        op: float = 1.0
+        if is_fade_out:
+            op = -1.0
+        for id, param in self.params.items():
+            end_val: float = start_val.get(id, 0) + (op * param.solve())
+            v0: tuple[float, float] = (0.0, start_val.get(id, 0))
+            v1: tuple[float, float] = (duration/3.0, start_val.get(id, 0))
+            v2: tuple[float, float] = (duration*2.0/3.0, end_val)
+            v3: tuple[float, float] = (duration, end_val)
+            new_seg = Segment(1, v0, v1=v1, v2=v2, v3=v3)
+            new_curve = Curve('Parameter', param.id, [new_seg])
+            curves[('Parameter', param.id)] = new_curve
+        new_motion = Motion(self.name + '_fade', duration, curves)
+        return new_motion
+
+    # Decentralised animation solver
+    def solve(self) -> dict[tuple[str, str], float]:
+        values: dict[tuple[str, str], float] = dict()
+        for id, param in self.params.items():
+            value: float = param.solve()
+            values[('Parameter', id)] = value
+        return values
+    
+    def solve_advanced(self, start_val: dict[str, float], is_fade_out: bool=False) -> dict[tuple[str, str], float]:
+        values: dict[tuple[str, str], float] = dict()
+        op: float = 1.0
+        if is_fade_out:
+            op = -1.0
+        for id, param in self.params.items():
+            value: float = start_val.get(id, 0) + (op * param.solve())
+            values[('Parameter', id)] = value
+        return values
+
+    # Read from file and return instantiated expression object
+    @staticmethod
+    def load(file_path: Path) -> Expression:
+        with open(file_path, 'r') as file:
+            data = json.load(file, parse_int=float)
+            params = Param.load(data['Parameters'])
+            expression = Expression(file_path.name.split('.')[0], params)
+        return expression
+
+# Class for model
+class Model:
+    def __init__(self, name: str):
+        self.name: str = name
+        self.renpy_model = None
+        self.motions: dict[str, Motion] = dict()
+        self.expressions: dict[str, Expression] = dict()
+        self.persistent: dict[tuple[str, str], float] = dict()
+        self.exclusive: Exclusive = Exclusive(self)
+        self.inclusive: Inclusive = Inclusive(self)
+        self.activeExpr: ActiveExpr = ActiveExpr(self)
+        return
+    
+    # Decentralised animation solver, mostly delegated to helper classes
+    def tick(self, renpy_model, st: float) -> float:
         global FPS
-        self.st = st
-        self.force_persistence(renpy_model)
-        self.animate_exclusive(renpy_model)
-        self.animate_inclusive(renpy_model)
-        self.animate_expression(renpy_model)
-        return 1.0/FPS
-    
-#######################################################################################################################
-
-    # Make it so when exclusive motions end they do not revert parameters to default values
-    def force_persistence(self, renpy_model) -> None:
+        if self.renpy_model is None:
+            self.renpy_model = renpy_model
+        self.persistent.update(self.activeExpr.tick(st))
+        self.persistent.update(self.inclusive.tick(st))
+        self.persistent.update(self.exclusive.tick(st))
         for (target, id), value in self.persistent.items():
             if target == 'Model' and id == 'Opacity':
-                # WIP
+                # I have no clue how to make model transparent without making joints look weird
                 pass
             # Part parameter value
             elif target == 'Parameter':
@@ -293,368 +321,416 @@ class Model:
             # Part opacity
             elif target == 'PartOpacity':
                 renpy_model.blend_opacity(id, "Overwrite", value)
-
-    # Call every frame to animate exclusive motions
-    def animate_exclusive(self, renpy_model) -> None:
-        # If currently idle, check queue
-        if self.st >= self.action_end_time:
-            # If queue empty and looping, add motion to the queue again
-            if self.exclusive_empty() and self.action_loop == True:
-                self.exclusive_push(self.action.name, 0, 0, self.action_loop)   # type: ignore
-                self.exclusive_skip()
-            # If queue empty and not looping, do nothing
-            elif self.exclusive_empty():
-                pass
-            # Otherwise pop from queue and play motion
-            else:
-                self.exclusive_skip()
-            return
-        
-        # If currently playing a motion, set model parameters
-        elif self.st >= self.action_start_time:
-            relative_st = self.st - self.action_start_time + self.action_skip_time
-            # Failsafe for if the motion has finished playing but program thinks it's still playing
-            if relative_st > self.action.duration:      # type: ignore
-                pass
-            else:
-                params = self.second(self.action.name, relative_st)     # type: ignore
-                for param in params:
-                    # Model opacity
-                    if param['Target'] == 'Model' and param['Id'] == 'Opacity':
-                        # WIP
-                        pass
-                    # Part parameter value
-                    elif param['Target'] == 'Parameter':
-                        renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
-                    # Part opacity
-                    elif param['Target'] == 'PartOpacity':
-                        renpy_model.blend_opacity(param['Id'], "Overwrite", param['Value'])
-                    self.persistent[(param['Target'], param['Id'])] = param['Value']
-            return
-        
-        # Else motion is waiting to start
-        else:
-            return
-        
-    # Call every frame to animate inclusive animations
-    def animate_inclusive(self, renpy_model) -> None:
-        for motion_name, (min_seconds, max_seconds, start_time, end_time) in self.inclusive.inclusive_dict.items():
-            # If motion has finished playing, randomise a new wait time before looping
-            if motion_name not in self.motions:
-                raise KeyError(f'No motion with the name {motion_name} associated with model {self.name}')
-            elif self.st > end_time:
-                rand = min_seconds + (max_seconds - min_seconds) * random.random()
-                self.inclusive.inclusive_dict[motion_name] = (min_seconds, max_seconds, self.st + rand, self.st + self.motions[motion_name].duration + rand)
-
-        # Refresh values after updating
-        for motion_name, (min_seconds, max_seconds, start_time, end_time) in self.inclusive.inclusive_dict.items():
-            relative_st = self.st - start_time
-            if relative_st > end_time - start_time:
-                # Failsafe for impossible end time value
-                relative_st = end_time - start_time
-            
-            # If motion is currently playing
-            if relative_st > 0:
-                params = self.second(motion_name, relative_st)
-                for param in params:
-                    # Model opacity
-                    if param['Target'] == 'Model' and param['Id'] == 'Opacity':
-                        # WIP
-                        pass
-                    # Part parameter value
-                    elif param['Target'] == 'Parameter':
-                        renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
-                    # Part opacity
-                    elif param['Target'] == 'PartOpacity':
-                        renpy_model.blend_opacity(param['Id'], "Overwrite", param['Value'])
-
-            # Else motion is waiting to start
-            else:
-                pass
-        return
+        return 1.0/FPS
     
-    # Call every frame to set expressions
-    def animate_expression(self, renpy_model) -> None:
-        if self.active_expressions.next is not None:
-            (expression_name, fade_time, is_fade_out) = self.active_expressions.next
-            if is_fade_out is True:
-                self.active_expressions.expressions_dict.pop(expression_name)
-            else:
-                self.active_expressions.expressions_dict[expression_name] = fade_time
-            self.active_expressions.next = None
-            if fade_time == 0:
-                goal_list = [param for param in self.expressions[expression_name].parameters]
-                for entry in goal_list:
-                    id = entry['Id']
-                    if id not in self.persistent_exp:
-                        self.persistent_exp[id] = renpy_model.common.model.parameters[id].default
-                    value = entry['Value']
-                    blend = entry['Blend']
-                    if blend == 'Add':
-                        if is_fade_out is True:
-                            value = self.persistent_exp[id] - value
-                        else:
-                            value = self.persistent_exp[id] + value
-                    elif blend == 'Overwrite':
-                        if is_fade_out is True:
-                            value = renpy_model.common.model.parameters[id].default
-                        else:
-                            pass
-                    else:
-                        raise ValueError('Expression blend must be "Add" or "Overwrite"')
-                    self.persistent_exp[id] = value
-            else:
-                self.fading = self.fade_and_add(renpy_model, expression_name, 'bezier', duration=fade_time, is_fade_out=is_fade_out)
-                self.fading_start_time = self.st
-                self.fading_end_time = self.st + fade_time
-
-        #for expression_name, fade_in_time in self.active_expressions.expressions_dict.items():
-        #    for param in self.expressions[expression_name].parameters:
-        #        renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
-        for id, value in self.persistent_exp.items():
-            renpy_model.blend_parameter(id, "Overwrite", value)
-
-        if self.st >= self.fading_end_time:
-            if self.fading is None:
-                pass
-            else:
-                self.fading = None
-                self.fading_start_time = 0.0
-                self.fading_end_time = 0.0
-            return
-
-        elif self.st >= self.fading_start_time:
-            relative_st = self.st - self.fading_start_time
-            assert self.fading
-            params = self.second(self.fading, relative_st)
-            for param in params:
-                renpy_model.blend_parameter(param['Id'], "Overwrite", param['Value'])
-            return
-
-        else:
-            return
-
-    # Find the value of every parameter of this motion at this second
-    def second(self, motion_name: str, relative_st: float) -> list[dict]:
-        values: list = list()
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
-        elif not (isinstance(relative_st, float) or isinstance(relative_st, int)):
-            raise TypeError('Seconds must be a float')
-        elif motion_name not in self.motions:
-            raise KeyError(f'No motion with the name "{motion_name}" associated with model "{self.name}"')
-        else:
-            # Find the value of every parameter of this motion at this second
-            if relative_st > self.motions[motion_name].duration:
-                # Failsafe for if relative st is greater than entire length of motion
-                relative_st = self.motions[motion_name].duration
-                
-            for curve in self.motions[motion_name].curves:
-                target = curve['Target']
-                id = curve['Id']
-                segments = curve['Segments']
-                row = 2
-                
-                loop = True
-                while(loop):
-                    if segments[row] == 0:
-                        # Linear segment
-                        if relative_st < segments[row+1] or len(segments) <= row+3:
-                            loop = False
-                        else:
-                            row += 3
-                    elif segments[row] == 1:
-                        # Bezier segment
-                        if relative_st < segments[row+5] or len(segments) <= row+7:
-                            loop = False
-                        else:
-                            row += 7
-                    elif segments[row] == 2 or segments[row] == 3:
-                        raise ValueError('Stepped and inverse-stepped segments are unsupported')
-                    else:
-                        raise ValueError('Unknown segment type')
-                    
-                p0 = (segments[row-2], segments[row-1])
-                p1 = (segments[row+1], segments[row+2])
-                if segments[row] == 1:
-                    p2 = (segments[row+3], segments[row+4])
-                    p3 = (segments[row+5], segments[row+6])
-                    value = bezier(relative_st, p0, p1, p2, p3)
-                else:
-                    value = linear(relative_st, p0, p1)
-                values.append({'Target': target, 'Id': id, 'Value': value})
-        return values
-
-#######################################################################################################################
-
-    # Transition from the current pose to the beginning of the provided one
-    def transition_and_push(self, motion_name: str, type: str='bezier', duration: float=0) -> None:
-        global default_transition_time
-        if not isinstance(motion_name, str):
-            raise TypeError('Motion name must be a string')
-        elif motion_name not in self.motions:
-            raise KeyError(f'No motion with the name "{motion_name}" associated with model "{self.name}"')
-        if not isinstance(type, str):
-            raise TypeError('Type must be "linear" or "bezier"')
-        elif not (type == 'linear' or type == 'bezier'):
-            raise ValueError(f'"{type}" is not a valid type. Choose "linear" or "bezier"')
-        elif not (isinstance(duration, float) or isinstance(duration, int)):
-            raise TypeError('Duration must be a float')
-        
-        if duration <= 0:
-            duration = default_transition_time
-
-        # Figure out the end state
-        transitions = dict()
-        goal_list = self.second(motion_name, duration)
-        for entry in goal_list:
-            target = entry['Target']
-            id = entry['Id']
-            value = entry['Value']
-            transitions[(target, id)] = value
-
-        # Failsafe for model in default pose
-        if len(self.persistent) <= 0:
-            transitions.clear()
-            transitions[('Model', 'Opacity')] = [0, 1, 0, duration, 1]
-        # Otherwise draw curves for transition animation
-        else:
-            for (target, id) in transitions:
-                if (target, id) in self.persistent:
-                    p31 = transitions[(target, id)]
-                    p01 = self.persistent[(target, id)]
-                    if type == 'linear':
-                        transitions[(target, id)] = [0, p01, 0, duration, p31]
-                    elif type == 'bezier':
-                        transitions[(target, id)] = [0, p01, 1, duration/3, p01, duration*2/3, p31, duration, p31]
-                    else:
-                        raise ValueError()
-                
-        # Create a new motion and append calculated values
-        curves = list()
-        for (target, id) in transitions:
-            if isinstance(transitions[(target, id)], list):
-                curves.append({'Target': target, 'Id': id, 'Segments': transitions[(target, id)]})
-        transition_motion_name = 'transition' + str(self.sequential_name)
-        self.sequential_name += 1
-        new_motion = Motion(transition_motion_name, duration, curves)
-        self.motions[transition_motion_name] = new_motion
-        
-        # Push motions to queue
-        self.exclusive_push(transition_motion_name)
-        self.exclusive_push(motion_name, skip_seconds=duration)
-
-    def fade_and_add(self, renpy_model, expression_name: str, type: str='bezier', duration: float=0, is_fade_out: bool=False) -> str:
-        global default_fade_time
-        if not isinstance(expression_name, str):
-            raise TypeError('Expression name must be a string')
-        elif expression_name not in self.expressions:
-            raise KeyError(f'No motion with the name "{expression_name}" associated with model "{self.name}"')
-        if not isinstance(type, str):
-            raise TypeError('Type must be "linear" or "bezier"')
-        elif not (type == 'linear' or type == 'bezier'):
-            raise ValueError(f'"{type}" is not a valid type. Choose "linear" or "bezier"')
-        elif not (isinstance(duration, float) or isinstance(duration, int)):
-            raise TypeError('Duration must be a float')
-        
-        if duration <= 0:
-            duration = default_fade_time
-
-        fades = dict()
-        goal_list = [param for param in self.expressions[expression_name].parameters]
-        for entry in goal_list:
-            id = entry['Id']
-            if id not in self.persistent_exp:
-                self.persistent_exp[id] = renpy_model.common.model.parameters[id].default
-            value = entry['Value']
-            blend = entry['Blend']
-            if blend == 'Add':
-                if is_fade_out is True:
-                    value = self.persistent_exp[id] - value
-                else:
-                    value = self.persistent_exp[id] + value
-            elif blend == 'Overwrite':
-                if is_fade_out is True:
-                    value = renpy_model.common.model.parameters[id].default
-                else:
-                    pass
-            else:
-                raise ValueError('Expression blend must be "Add" or "Overwrite"')
-            fades[id] = value
-
-        for id in fades:
-            p31 = fades[id]
-            p01 = self.persistent_exp[id]
-            self.persistent_exp[id] = fades[id]
-            if type == 'linear':
-                fades[id] = [0, p01, 0, duration, p31]
-            elif type == 'bezier':
-                fades[id] = [0, p01, 1, duration/3, p01, duration*2/3, p31, duration, p31]
-            else:
-                raise ValueError()
-            
-        # Create a new motion and append calculated values
-        curves = list()
-        for id in fades:
-            if isinstance(fades[id], list):
-                curves.append({'Target': 'Parameter', 'Id': id, 'Segments': fades[id]})
-        fade_motion_name = 'fade' + str(self.sequential_name)
-        self.sequential_name += 1
-        new_motion = Motion(fade_motion_name, duration, curves)
-        self.motions[fade_motion_name] = new_motion
-
-        return fade_motion_name
-
-#######################################################################################################################
-
-# Static function
-# Load a Live2D model given its directory path
-def load_model(game_dir: str, file_name: str) -> Model:
-    live2d_path = Path(game_dir) / 'live2d' / file_name
-    # Check if directory is a Live2D model folder
-    if live2d_path.is_dir() and (live2d_path / (file_name + '.model3.json')).is_file():
+    def reset(self) -> bool:
+        self.activeExpr.clear()
+        self.inclusive.clear()
+        self.exclusive.clear()
+        self.persistent = dict()
+        return True
+    
+    def __str__(self) -> str:
+        output: str = f'Model name: {self.name}'
+        for motion in self.motions.values():
+            output += motion.__str__()
+        for expression in self.expressions.values():
+            output += expression.__str__()
+        return output
+    
+    # Read from folder and return instantiated model object
+    @staticmethod
+    def load(game_dir: str, file_name: str) -> Model:
+        live2d_path = Path(game_dir) / 'live2d' / file_name
+        # Check if directory is a Live2D model folder
+        if (not live2d_path.is_dir()) or (not (live2d_path / (file_name + '.model3.json')).is_file()):
+            raise OSError(f'{live2d_path} is not a valid path')
         # Create an empty model
         model = Model(file_name)
         motions_dir = live2d_path / 'Motions'
         expressions_dir = live2d_path / 'Expressions'
-
         # Read each motion and populate the model
         for motion_entry in motions_dir.iterdir():
             motion_path = motions_dir / motion_entry
             if motion_path.is_file():
-                motion = load_motion(motion_path)
+                motion = Motion.load(motion_path)
                 model.motions[motion.name.split('.')[0]] = motion
-
         # Read each expression and populate the model
         for expression_entry in expressions_dir.iterdir():
             expression_path = expressions_dir / expression_entry
             if expression_path.is_file():
-                expression = load_expression(expression_path)
+                expression = Expression.load(expression_path)
                 model.expressions[expression.name.split('.')[0]] = expression
+        return model
     
-    # Folder not found or Live2D files not found
-    else:
-        raise OSError(f'{live2d_path} is not a valid path')
-    return model
+# Class for managing exclusive motions of a model
+class Exclusive:
+    def __init__(self, model: Model) -> None:
+        self.model: Model = model
+        self.st: float = 0.0
+        self.items: Queue[dict[str, Any]] = Queue()
+        self.buffer: dict[str, Any] = dict()
+        self.start: float = 0.0
+        self.end: float = 0.0
+        return
+    
+    # Decentralised animation solver, calculates frame data
+    def tick(self, st: float) -> dict[tuple[str, str], float]:
+        self.st = st
+        # If last motion has ended
+        if self.end < self.st:
+            # If queue has items, pop from queue and play motion
+            if not self.is_empty():
+                self.skip()
+            # If queue is empty and last motion was looping, requeue from buffer
+            elif (self.buffer) and (self.buffer['loop'] == True):
+                temp = self.skip()
+                assert(temp)
+                self.items.put(temp)
+            # Otherwise player is idle
+        # If motion is currently playing
+        elif (self.buffer) and (self.start <= self.st):
+            relative_st: float = self.st - self.start + self.buffer['crop_seconds']
+            return self.buffer['motion'].solve(relative_st)
+        # Otherwise player is idle
+        return dict()
+    
+    # Immediately begin a transition to the given motion.
+    # Clears the queue.
+    def transition_to(self, motion: str | Motion, duration: float=default_transition_time, segment_type: int=1) -> bool:
+        temp: Motion
+        # Parse motion
+        if type(motion) is str:
+            temp = self.model.motions[motion]
+            if temp is None:
+                return False
+        else:
+            assert type(motion) is Motion
+            temp = motion
+        # Find out which parameters needs to transition
+        start_val: dict[tuple[str, str], float] = dict()
+        keys: list[tuple[str, str]] = temp.param_ids()
+        for key in keys:
+            if key in self.model.persistent:
+                start_val[key] = self.model.persistent[key]
+            else:
+                start_val[key] = 0.0
+        new_motion = temp.make_transition(start_val, duration)
+        self.clear()
+        self.push(new_motion)
+        self.push(temp, crop_seconds=duration)
+        return True
+    
+    # Enqueue an exclusive motion
+    def push(self, motion: str | Motion, wait_seconds: float=0.0, crop_seconds: float=0.0, loop: bool=False) -> bool:
+        entry: dict[str, Any] = dict()
+        temp: Motion
+        # Parse motion
+        if type(motion) is str:
+            temp = self.model.motions[motion]
+            if temp is None:
+                return False
+        else:
+            assert type(motion) is Motion
+            temp = motion
+        entry['motion'] = temp
+        entry['wait_seconds'] = wait_seconds
+        entry['crop_seconds'] = crop_seconds
+        entry['loop'] = loop
+        return self.push_raw(entry)
+    
+    def push_raw(self, entry: dict[str, Any]) -> bool:
+        try:
+            self.items.put(entry)
+        except:
+            return False
+        return True
+    
+    def push_many(self, entries: list[dict[str, Any]]) -> list[bool]:
+        lst: list[bool] = list()
+        for entry in entries:
+            lst.append(self.push_raw(entry))
+        return lst
 
-# Static function
-# Load a Live2D motion given its directory path
-def load_motion(file_path: Path) -> Motion:
-    with open(file_path, 'r') as file:
-        data = json.load(file, parse_int=float)
-        motion = Motion(file_path.name.split('.')[0], data['Meta']['Duration'], data['Curves'])
-    return motion
+    # Dequeue an exclusive motion
+    def pop(self) -> dict[str, Any]:
+        if self.is_empty():
+            return dict()
+        return self.items.get()
 
-# Static function
-# Load a Live2D expression given its directory path
-def load_expression(file_path: Path) -> Expression:
-    with open(file_path, 'r') as file:
-        data = json.load(file, parse_int=float)
-        expression = Expression(file_path.name.split('.')[0], data['Parameters'])
-    return expression
+    # Cancel the current motion and start playing the next motion in queue
+    def skip(self) -> dict[str, Any]:
+        temp = dict()
+        # If currently playing something, make a copy for returning later
+        if self.buffer:
+            temp = self.buffer.copy()
+        # If queue is empty, clear buffer
+        if self.is_empty():
+            self.buffer = dict()
+            self.start = 0.0
+            self.end = 0.0
+        # Else queue is not empty, pop from queue into buffer
+        else:
+            self.buffer = self.pop()
+            # Condition already checked above, use assert to make Pylance happy
+            assert(self.buffer)
+            motion: Motion = self.buffer['motion']
+            wait_seconds: float = self.buffer['wait_seconds']
+            crop_seconds: float = self.buffer['crop_seconds']
+            if crop_seconds > motion.duration:
+                crop_seconds = motion.duration
+            self.start = self.st + wait_seconds
+            self.end = self.start + motion.duration - crop_seconds
+        return temp
+    
+    # Skips all enqueued motions
+    def clear(self) -> bool:
+        self.items = Queue()
+        self.buffer = dict()
+        self.start = 0.0
+        self.end = 0.0
+        return True
 
-# Static function
+    # Returns currently enqueued exclusive motions
+    def members(self) -> list:
+        lst = list(self.items.queue)
+        return lst
+
+    # Returns number of currently enqueued exclusive motions
+    def length(self) -> float:
+        lst = list(self.items.queue)
+        return len(lst)
+
+    # Returns true if there are no currently enqueued exclusive motions
+    def is_empty(self) -> bool:
+        return self.items.empty()
+
+# Class for managing inclusive motions of a model
+class Inclusive:
+    def __init__(self, model: Model) -> None:
+        self.model: Model = model
+        self.st: float = 0.0
+        self.items: dict[Motion, tuple[float, float, float, float]] = dict()
+        return
+    
+    # Decentralised animation solver, calculates frame data
+    def tick(self, st: float) -> dict[tuple[str, str], float]:
+        self.st = st
+        framedata: dict[tuple[str, str], float] = dict()
+        # Check each inclusive motion
+        for motion, (min_wait, max_wait, start, end) in self.items.items():
+            # If current loop has ended
+            if end < self.st:
+                self.generate_loop(motion)
+            # If motion is currently playing
+            elif start <= self.st:
+                relative_st: float = self.st - start
+                framedata.update(motion.solve(relative_st))
+        return framedata
+    
+    # Add an inclusive motion
+    def add(self, motion: str | Motion, min_wait: float, max_wait: float) -> bool:
+        entry: tuple[float, float, float, float] = (min_wait, max_wait, 0.0, 0.0)
+        temp: Motion
+        # Parse motion
+        if type(motion) is str:
+            temp = self.model.motions[motion]
+            if temp is None:
+                return False
+        else:
+            assert type(motion) is Motion
+            temp = motion
+        return self.add_raw(temp, entry)
+
+    def add_raw(self, motion: Motion, entry: tuple[float, float, float, float]) -> bool:
+        try:
+            self.items[motion] = entry
+        except:
+            return False
+        return True
+
+    def add_many(self, entries: dict[Motion, tuple[float, float, float, float]]) -> bool:
+        try:
+            self.items.update(entries)
+        except:
+            return False
+        return True
+    
+    # Remove an inclusive motion
+    def remove(self, motion: str | Motion) -> bool:
+        temp: Motion
+        if self.is_empty():
+            return False
+        # Parse motion
+        elif type(motion) is str:
+            temp = self.model.motions[motion]
+            if temp is None:
+                return False
+        else:
+            assert type(motion) is Motion
+            temp = motion
+        try:
+            self.items.pop(temp)
+        except:
+            return False
+        return True
+
+    def remove_many(self, motions: list[str | Motion]) -> list[bool]:
+        lst: list[bool] = list()
+        for motion in motions:
+            lst.append(self.remove(motion))
+        return lst
+
+    # Randomise a new cycle of animation to be played
+    def generate_loop(self, motion: Motion) -> None:
+        duration: float = motion.duration
+        (min_wait, max_wait, _, _) = self.items[motion]
+        rand = min_wait + (max_wait - min_wait)*random.random()
+        start = self.st + rand
+        end = start + duration
+        self.items[motion] = (min_wait, max_wait, start, end)
+
+    def clear(self) -> bool:
+        self.items = dict()
+        return True
+
+    # Returns currently active inclusive motions
+    def members(self) -> list:
+        lst = list(self.items.items())
+        return lst
+
+    # Returns number of currently active inclusive motions
+    def length(self) -> float:
+        return len(self.items)
+
+    # Returns true if there are no currently active inclusive motions
+    def is_empty(self) -> bool:
+        return not self.items
+
+class ActiveExpr:
+    def __init__(self, model: Model) -> None:
+        self.model: Model = model
+        self.st: float = 0.0
+        self.items: set[Expression] = set()
+        self.fading: dict[Motion, tuple[float, float, bool]] = dict()
+        return
+    
+    def tick(self, st: float) -> dict[tuple[str, str], float]:
+        self.st = st
+        framedata: dict[tuple[str, str], float] = dict()
+        temp: list[Motion] = list()
+        # Setup any active expressions first
+        for expr in self.items:
+            start_val: dict[str, float]
+            if self.model.renpy_model is not None:
+                start_val = {k:framedata.get(('Parameter', k), float(self.model.renpy_model.common.model.parameters[k].default)) for k in expr.param_ids()}
+            else:
+                start_val = {k:framedata.get(('Parameter', k), 0) for k in expr.param_ids()}
+            framedata.update(expr.solve_advanced(start_val))
+        # Animate fades second
+        for motion, (start, end, is_fade_out) in self.fading.items():
+            # If fade is over, add it as an active expression and remove it from the dict
+            if end < self.st:
+                temp.append(motion)
+                expr: Expression = self.model.expressions[motion.name.removesuffix("_fade")]
+                if is_fade_out:
+                    self.items.remove(expr)
+                    start_val: dict[str, float]
+                    if self.model.renpy_model is not None:
+                        start_val = {k:framedata.get(('Parameter', k), float(self.model.renpy_model.common.model.parameters[k].default)) for k in expr.param_ids()}
+                    else:
+                        start_val = {k:framedata.get(('Parameter', k), 0) for k in expr.param_ids()}
+                    framedata.update(expr.solve_advanced(start_val, is_fade_out=True))
+                else:
+                    self.items.add(expr)
+            # If fade is currently in effect
+            elif start <= self.st:
+                relative_st: float = self.st - start
+                framedata.update(motion.solve(relative_st))
+        for motion in temp:
+            self.fading.pop(motion)
+        return framedata
+    
+    def add_remove(self, expr: str | Expression, fade_duration: float=default_fade_time, is_fade_out: bool=False) -> bool:
+        temp: Expression
+        # Parse expression
+        if type(expr) is str:
+            temp = self.model.expressions[expr]
+            if temp is None:
+                return False
+        else:
+            assert type(expr) is Expression
+            temp = expr
+        # Check if expression is already active
+        is_fading: bool = temp.name in [motion.name for motion in self.fading.keys()]
+        if not is_fade_out and (is_fading or self.items.issuperset({temp})):
+            return False
+        elif is_fade_out and not (is_fading or self.items.issuperset({temp})):
+            return False
+        # Skip animations if fade duration is zero
+        if fade_duration <= 0:
+            if is_fade_out:
+                self.items.remove(temp)
+                # Do this stupid calc for all expressions to find out what the end value is
+                # Like why are expressions calculated as addition instead of overwrite which mf made this
+                framedata: dict[tuple[str, str], float] = dict()
+                for expr in self.items:
+                    start_val: dict[str, float]
+                    if self.model.renpy_model is not None:
+                        start_val = {k:framedata.get(('Parameter', k), float(self.model.renpy_model.common.model.parameters[k].default)) for k in expr.param_ids()}
+                    else:
+                        start_val = {k:framedata.get(('Parameter', k), 0) for k in expr.param_ids()}
+                    framedata.update(expr.solve_advanced(start_val))
+                start_val: dict[str, float]
+                if self.model.renpy_model is not None:
+                    start_val = {k:framedata.get(('Parameter', k), float(self.model.renpy_model.common.model.parameters[k].default)) for k in temp.param_ids()}
+                else:
+                    start_val = {k:framedata.get(('Parameter', k), 0) for k in temp.param_ids()}
+                self.model.persistent.update(temp.solve_advanced(start_val, is_fade_out=True))
+            else:
+                self.items.add(temp)
+            return True
+        # Otherwise create an animation and use it
+        else:
+            start_val: dict[str, float] = dict()
+            for id in temp.param_ids():
+                # If parameter not in persistent, add it from base model data
+                if ('Parameter', id) not in self.model.persistent:
+                    if self.model.renpy_model is None:
+                        return False
+                    self.model.persistent[('Parameter', id)] = self.model.renpy_model.common.model.parameters[id].default
+                start_val[id] = self.model.persistent.get(('Parameter', id), 0)
+            new_motion = temp.to_motion(start_val, fade_duration, is_fade_out)
+            self.fading[new_motion] = (self.st, self.st + fade_duration, is_fade_out)
+        return True
+    
+    def add(self, expr: str | Expression, fade_duration: float=default_fade_time) -> bool:
+        return self.add_remove(expr, fade_duration, False)
+    
+    def remove(self, expr: str | Expression, fade_duration: float=default_fade_time) -> bool:
+        return self.add_remove(expr, fade_duration, True)
+    
+    # Removes all active expressions
+    def clear(self) -> bool:
+        self.items = set()
+        self.fading = dict()
+        return True
+    
+    # Returns currently active expressions
+    def members(self) -> list:
+        lst = list(self.items)
+        return lst
+
+    # Returns number of currently active expressions
+    def length(self) -> float:
+        return len(self.items)
+
+    # Returns true if there are no currently active expressions
+    def is_empty(self) -> bool:
+        return not self.items
+
 # Set the default fade duration
+@staticmethod
 def set_fade_default_time(duration: float) -> None:
     global default_fade_time
     if not (isinstance(duration, float) or isinstance(duration, int)):
@@ -662,27 +738,11 @@ def set_fade_default_time(duration: float) -> None:
     default_fade_time = float(duration)
     return
 
-# Static function
 # Set the default transition duration
+@staticmethod
 def set_transition_default_time(duration: float) -> None:
     global default_transition_time
     if not (isinstance(duration, float) or isinstance(duration, int)):
         raise TypeError('Duration must be a float')
     default_transition_time = float(duration)
     return
-
-# Static function
-# Solve for y given st (x) in a linear equation
-def linear(st: float, p0: tuple[float, float], p1: tuple[float, float]) -> float:
-    # Normalise st to t
-    t = (st-p0[0]) / (p1[0]-p0[0])
-    y = t*(p1[1]-p0[1]) + p0[1]
-    return y
-
-# Static function
-# Solve for y given st (x) in a cubic bezier
-def bezier(st: float, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float]) -> float:
-    # Normalise st to t
-    t = (st-p0[0]) / (p3[0]-p0[0])
-    y = (1-t)**3 * p0[1] + 3*t*(1-t)**2 * p1[1] + 3*(1-t)*t**2 * p2[1] + t**3 * p3[1]
-    return y
