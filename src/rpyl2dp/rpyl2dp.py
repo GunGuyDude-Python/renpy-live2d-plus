@@ -208,8 +208,6 @@ class Param:
         self.id: str = id
         self.value: float = value
         self.blend: str = 'Add'
-        if blend in ['Add', 'Overwrite']:
-            self.blend = blend
         return
     
     def __str__(self) -> str:
@@ -290,79 +288,6 @@ class Expression:
             expression = Expression(file_path.name.split('.')[0], params)
         return expression
 
-# Class for model
-class Model:
-    def __init__(self, name: str):
-        self.name: str = name
-        self.renpy_model = None
-        self.motions: dict[str, Motion] = dict()
-        self.expressions: dict[str, Expression] = dict()
-        self.persistent: dict[tuple[str, str], float] = dict()
-        self.exclusive: Exclusive = Exclusive(self)
-        self.inclusive: Inclusive = Inclusive(self)
-        self.activeExpr: ActiveExpr = ActiveExpr(self)
-        return
-    
-    # Decentralised animation solver, mostly delegated to helper classes
-    def tick(self, renpy_model, st: float) -> float:
-        global FPS
-        if self.renpy_model is None:
-            self.renpy_model = renpy_model
-        self.persistent.update(self.activeExpr.tick(st))
-        self.persistent.update(self.inclusive.tick(st))
-        self.persistent.update(self.exclusive.tick(st))
-        for (target, id), value in self.persistent.items():
-            if target == 'Model' and id == 'Opacity':
-                # I have no clue how to make model transparent without making joints look weird
-                pass
-            # Part parameter value
-            elif target == 'Parameter':
-                renpy_model.blend_parameter(id, "Overwrite", value)
-            # Part opacity
-            elif target == 'PartOpacity':
-                renpy_model.blend_opacity(id, "Overwrite", value)
-        return 1.0/FPS
-    
-    def reset(self) -> bool:
-        self.activeExpr.clear()
-        self.inclusive.clear()
-        self.exclusive.clear()
-        self.persistent = dict()
-        return True
-    
-    def __str__(self) -> str:
-        output: str = f'Model name: {self.name}'
-        for motion in self.motions.values():
-            output += motion.__str__()
-        for expression in self.expressions.values():
-            output += expression.__str__()
-        return output
-    
-    # Read from folder and return instantiated model object
-    @staticmethod
-    def load(game_dir: str, file_name: str) -> Model:
-        live2d_path = Path(game_dir) / 'live2d' / file_name
-        # Check if directory is a Live2D model folder
-        if (not live2d_path.is_dir()) or (not (live2d_path / (file_name + '.model3.json')).is_file()):
-            raise OSError(f'{live2d_path} is not a valid path')
-        # Create an empty model
-        model = Model(file_name)
-        motions_dir = live2d_path / 'Motions'
-        expressions_dir = live2d_path / 'Expressions'
-        # Read each motion and populate the model
-        for motion_entry in motions_dir.iterdir():
-            motion_path = motions_dir / motion_entry
-            if motion_path.is_file():
-                motion = Motion.load(motion_path)
-                model.motions[motion.name.split('.')[0]] = motion
-        # Read each expression and populate the model
-        for expression_entry in expressions_dir.iterdir():
-            expression_path = expressions_dir / expression_entry
-            if expression_path.is_file():
-                expression = Expression.load(expression_path)
-                model.expressions[expression.name.split('.')[0]] = expression
-        return model
-    
 # Class for managing exclusive motions of a model
 class Exclusive:
     def __init__(self, model: Model) -> None:
@@ -492,18 +417,43 @@ class Exclusive:
         return True
 
     # Returns currently enqueued exclusive motions
-    def members(self) -> list:
-        lst = list(self.items.queue)
+    def members(self) -> list[dict[str, Any]]:
+        lst = list()
+        if self.buffer:
+            lst.append(self.buffer)
+        if not self.is_empty():
+            lst.extend(list(self.items.queue))
         return lst
 
     # Returns number of currently enqueued exclusive motions
     def length(self) -> float:
-        lst = list(self.items.queue)
-        return len(lst)
+        n: int = 0
+        if self.buffer:
+            n += 1
+        n += self.items.qsize()
+        return n
 
     # Returns true if there are no currently enqueued exclusive motions
     def is_empty(self) -> bool:
-        return self.items.empty()
+        return (self.items.qsize() < 1)
+    
+    # Import an exclusive as a dict
+    @staticmethod
+    def deserialise(serial: dict, model: Model) -> Exclusive:
+        items: list = serial.get('items', list())
+        for item in items:
+            model.exclusive.push(item['motion'], item['wait_seconds'], item['crop_seconds'], item['loop'])
+        return model.exclusive
+
+    # Export an exclusive to a dict
+    @staticmethod
+    def serialise(exclusive: Exclusive) -> dict:
+        motions = exclusive.members()
+        for motion in motions:
+            motion['motion'] = motion['motion'].name
+        serial: dict = dict()
+        serial['items'] = motions
+        return serial
 
 # Class for managing inclusive motions of a model
 class Inclusive:
@@ -606,6 +556,23 @@ class Inclusive:
     # Returns true if there are no currently active inclusive motions
     def is_empty(self) -> bool:
         return not self.items
+    
+    # Import an inclusive as a dict
+    @staticmethod
+    def deserialise(serial: dict, model: Model) -> Inclusive:
+        items: list[tuple[str, float, float]] = serial.get('items', list())
+        for (motion, min, max) in items:
+            model.inclusive.add(motion, min, max)
+        for motion, _ in model.inclusive.items.items():
+            model.inclusive.generate_loop(motion)
+        return model.inclusive
+
+    # Export an inclusive to a dict
+    @staticmethod
+    def serialise(inclusive: Inclusive) -> dict:
+        serial: dict = dict()
+        serial['items'] = [(motion.name, min, max) for motion, (min, max, _, _) in inclusive.items.items()]
+        return serial
 
 class ActiveExpr:
     def __init__(self, model: Model) -> None:
@@ -728,6 +695,124 @@ class ActiveExpr:
     # Returns true if there are no currently active expressions
     def is_empty(self) -> bool:
         return not self.items
+    
+    # Import an active expression as a dict
+    @staticmethod
+    def deserialise(serial: dict, model: Model) -> ActiveExpr:
+        items: list[str] = serial.get('items', list())
+        for item in items:
+            model.activeExpr.add(item, 0.0)
+        return model.activeExpr
+
+    # Export an active expression to a dict
+    @staticmethod
+    def serialise(expr: ActiveExpr) -> dict:
+        serial: dict = dict()
+        serial['items'] = [x.name for x in expr.items]
+        return serial
+    
+# Class for model
+class Model:
+    def __init__(self, name: str):
+        self.name: str = name
+        self.renpy_model = None
+        self.motions: dict[str, Motion] = dict()
+        self.expressions: dict[str, Expression] = dict()
+        self.persistent: dict[tuple[str, str], float] = dict()
+        self.exclusive: Exclusive = Exclusive(self)
+        self.inclusive: Inclusive = Inclusive(self)
+        self.activeExpr: ActiveExpr = ActiveExpr(self)
+        return
+    
+    # Decentralised animation solver, mostly delegated to helper classes
+    def tick(self, renpy_model, st: float) -> float:
+        global FPS
+        if self.renpy_model is None:
+            self.renpy_model = renpy_model
+        self.persistent.update(self.activeExpr.tick(st))
+        self.persistent.update(self.inclusive.tick(st))
+        self.persistent.update(self.exclusive.tick(st))
+        for (target, id), value in self.persistent.items():
+            if target == 'Model' and id == 'Opacity':
+                # I have no clue how to make model transparent without making joints look weird
+                pass
+            # Part parameter value
+            elif target == 'Parameter':
+                renpy_model.blend_parameter(id, "Overwrite", value)
+            # Part opacity
+            elif target == 'PartOpacity':
+                renpy_model.blend_opacity(id, "Overwrite", value)
+        return 1.0/FPS
+    
+    def reset(self) -> bool:
+        self.activeExpr.clear()
+        self.inclusive.clear()
+        self.exclusive.clear()
+        self.persistent = dict()
+        return True
+    
+    def __str__(self) -> str:
+        output: str = f'Model name: {self.name}'
+        for motion in self.motions.values():
+            output += motion.__str__()
+        for expression in self.expressions.values():
+            output += expression.__str__()
+        return output
+    
+    # Read from folder and return instantiated model object
+    @staticmethod
+    def load(game_dir: str, file_name: str) -> Model:
+        live2d_path = Path(game_dir) / 'live2d' / file_name
+        # Check if directory is a Live2D model folder
+        if (not live2d_path.is_dir()) or (not (live2d_path / (file_name + '.model3.json')).is_file()):
+            raise OSError(f'{live2d_path} is not a valid path')
+        # Create an empty model
+        model = Model(file_name)
+        motions_dir = live2d_path / 'Motions'
+        expressions_dir = live2d_path / 'Expressions'
+        # Read each motion and populate the model
+        for motion_entry in motions_dir.iterdir():
+            motion_path = motions_dir / motion_entry
+            if motion_path.is_file():
+                motion = Motion.load(motion_path)
+                model.motions[motion.name.split('.')[0]] = motion
+        # Read each expression and populate the model
+        for expression_entry in expressions_dir.iterdir():
+            expression_path = expressions_dir / expression_entry
+            if expression_path.is_file():
+                expression = Expression.load(expression_path)
+                model.expressions[expression.name.split('.')[0]] = expression
+        return model
+    
+    # Import a model as a dict
+    @staticmethod
+    def deserialise(serial: dict, model: Model) -> Model:
+        name: str = serial.get('name', str())
+        # motions: dict[str, Motion] = {n:Motion.deserialise(m) for n, m in serial.get('motions', dict()).items()}
+        # expressions: dict[str, Expression] = {n:Expression.deserialise(m) for n, m in serial.get('expressions', dict()).items()}
+        model.persistent = serial.get('persistent', dict())
+        Exclusive.deserialise(serial.get('exclusive', dict()), model)
+        Inclusive.deserialise(serial.get('inclusive', dict()), model)
+        ActiveExpr.deserialise(serial.get('activeExpr', dict()), model)
+        # model.motions = motions
+        # model.expressions = expressions
+        # model.exclusive = exclusive
+        # model.inclusive = inclusive
+        # model.activeExpr = activeExpr
+        return model
+    
+    # Export a model to a dict
+    @staticmethod
+    def serialise(model: Model) -> dict:
+        serial: dict = dict()
+        serial['name'] = model.name
+        # serial['motions'] = {n:Motion.serialise(m) for n, m in model.motions.items()}
+        # serial['expressions'] = {n:Expression.serialise(e) for n, e in model.expressions.items()}
+        serial['persistent'] = model.persistent
+        serial['exclusive'] = Exclusive.serialise(model.exclusive)
+        serial['inclusive'] = Inclusive.serialise(model.inclusive)
+        serial['activeExpr'] = ActiveExpr.serialise(model.activeExpr)
+        return serial
 
 # Set the default fade duration
 @staticmethod
