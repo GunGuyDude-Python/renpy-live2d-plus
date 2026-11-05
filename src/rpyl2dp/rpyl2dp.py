@@ -450,7 +450,10 @@ class Exclusive:
     def serialise(exclusive: Exclusive) -> dict:
         motions = exclusive.members()
         for motion in motions:
+            # Parse motions into string, use default if motion is a transition
             motion['motion'] = motion['motion'].name
+            if motion['motion'].endswith('_transition'):
+                motion['motion'] = motion['motion'][:-11]
         serial: dict = dict()
         serial['items'] = motions
         return serial
